@@ -149,6 +149,11 @@ public static class AutoSetup
             Set(role,
                 new ContactKey { Hand = Side.Left, Time = reloadRelease, State = ContactState.Released, Blend = 0.3f },
                 new ContactKey { Hand = Side.Left, Time = reloadReturn, State = ContactState.Locked, Blend = 0.3f });
+        // Shell-by-shell reloads: the support hand loads the shells, then takes the grip back.
+        Set(AnimationRole.ReloadStart, new ContactKey { Hand = Side.Left, Time = 0.15f, State = ContactState.Released, Blend = 0.25f });
+        Set(AnimationRole.ReloadInsert, new ContactKey { Hand = Side.Left, Time = 0f, State = ContactState.Released, Blend = 0f });
+        Set(AnimationRole.ReloadEnd, new ContactKey { Hand = Side.Left, Time = 0f, State = ContactState.Released, Blend = 0f },
+            new ContactKey { Hand = Side.Left, Time = 0.7f, State = ContactState.Locked, Blend = 0.25f });
         Set(AnimationRole.Melee, new ContactKey { Hand = Side.Left, Time = 0.05f, State = ContactState.Released, Blend = 0.1f },
             new ContactKey { Hand = Side.Left, Time = 0.85f, State = ContactState.Locked, Blend = 0.2f });
         Set(AnimationRole.Sprint, new ContactKey { Hand = Side.Left, Time = 0f, State = ContactState.Released, Blend = 0.2f });

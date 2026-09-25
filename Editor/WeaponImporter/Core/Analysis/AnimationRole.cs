@@ -27,6 +27,12 @@ public enum AnimationRole
     AdsOut,
     /// <summary>Looping aimed pose (while aiming, after ADS raised the sights).</summary>
     AdsIdle,
+    /// <summary>Shell-by-shell reload, first part (to the loading port).</summary>
+    ReloadStart,
+    /// <summary>Shell-by-shell reload: one shell (repeated per shell).</summary>
+    ReloadInsert,
+    /// <summary>Shell-by-shell reload, last part (pump, back to idle).</summary>
+    ReloadEnd,
 }
 
 public static class AnimationRoles
@@ -35,7 +41,7 @@ public static class AnimationRoles
     public static readonly AnimationRole[] All =
     {
         AnimationRole.Idle, AnimationRole.Fire, AnimationRole.FireEmpty, AnimationRole.Reload,
-        AnimationRole.TacticalReload, AnimationRole.EmptyReload, AnimationRole.Draw, AnimationRole.Holster,
+        AnimationRole.TacticalReload, AnimationRole.EmptyReload, AnimationRole.ReloadStart, AnimationRole.ReloadInsert, AnimationRole.ReloadEnd, AnimationRole.Draw, AnimationRole.Holster,
         AnimationRole.Inspect, AnimationRole.Sprint, AnimationRole.Walk, AnimationRole.Ads, AnimationRole.AdsIdle, AnimationRole.AdsOut, AnimationRole.AdsFire,
         AnimationRole.Melee, AnimationRole.Bolt, AnimationRole.Jam, AnimationRole.Unjam,
     };
@@ -51,6 +57,9 @@ public static class AnimationRoles
         AnimationRole.Ads => "ADS",
         AnimationRole.AdsOut => "ADS Out",
         AnimationRole.AdsIdle => "ADS Idle",
+        AnimationRole.ReloadStart => "Reload Start",
+        AnimationRole.ReloadInsert => "Insert Shell",
+        AnimationRole.ReloadEnd => "Reload End",
         AnimationRole.AdsFire => "ADS Fire",
         AnimationRole.Bolt => "Bolt / Charge",
         _ => role.ToString(),
@@ -60,6 +69,10 @@ public static class AnimationRoles
     /// Roles that cycle. ADS is not one: it raises the sights and the aimed pose is held at its
     /// last frame while the player aims (Weapon Hold's Aiming).
     /// </summary>
+    /// <summary>A part of a shell-by-shell reload (start, one shell, end).</summary>
+    public static bool IsShellReload(AnimationRole role)
+        => role is AnimationRole.ReloadStart or AnimationRole.ReloadInsert or AnimationRole.ReloadEnd;
+
     public static bool Loops(AnimationRole role)
         => role is AnimationRole.Idle or AnimationRole.Sprint or AnimationRole.Walk or AnimationRole.AdsIdle;
 
@@ -80,7 +93,7 @@ public static class AnimationRoles
     public static string? GraphTrigger(AnimationRole role) => role switch
     {
         AnimationRole.Fire or AnimationRole.AdsFire or AnimationRole.FireEmpty => "b_attack",
-        AnimationRole.Reload or AnimationRole.TacticalReload or AnimationRole.EmptyReload => "b_reload",
+        AnimationRole.Reload or AnimationRole.TacticalReload or AnimationRole.EmptyReload or AnimationRole.ReloadStart or AnimationRole.ReloadInsert or AnimationRole.ReloadEnd => "b_reload",
         AnimationRole.Draw => "b_deploy",
         _ => null,
     };

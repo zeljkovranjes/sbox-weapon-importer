@@ -101,6 +101,8 @@ public static class Validation
         {
             var missing = AnimationRoles.Required
                 .Where(r => !s.WeaponAnimations.ContainsKey(r) && !(AnimationRoles.Fallback(r) is { } f && s.WeaponAnimations.ContainsKey(f)))
+                // A shell-by-shell reload is a reload.
+                .Where(r => !(r == AnimationRole.Reload && s.WeaponAnimations.ContainsKey(AnimationRole.ReloadInsert)))
                 .ToList();
             if (missing.Count > 0)
                 Add("Animations", CheckSeverity.Warning, $"No {string.Join(", ", missing.Select(AnimationRoles.Label))} animation; the character's own animation plays instead.");

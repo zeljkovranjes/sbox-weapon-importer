@@ -15,6 +15,9 @@ public sealed class WeaponHold : Component
     private const string IdleRole = "idle";
     private const string FireRole = "fire";
     private const string AimedFireRole = "adsfire";
+    private const string ReloadStartRole = "reloadstart";
+    private const string InsertRole = "reloadinsert";
+    private const string ReloadEndRole = "reloadend";
     private const float DefaultActionSeconds = 1f;
     private const float ReachGateSeconds = 0.35f;
     private const float ReachFadeDistance = 6f;
@@ -119,6 +122,32 @@ public sealed class WeaponHold : Component
     /// </summary>
     [Property] public bool Aiming { get; set; }
 
+    /// <summary>
+    /// Shells a shell-by-shell reload loads (weapons with reload start / insert / end clips). Set it
+    /// from your ammo before the reload starts; 0 skips the reload.
+    /// </summary>
+    [Property] public int ShellsToLoad { get; set; } = 4;
+
+    /// <summary>A shell-by-shell reload is running.</summary>
+    public bool ShellReloading => _shellReload;
+
+    /// <summary>Shells still to insert in the running shell reload (the current one included).</summary>
+    public int ShellsRemaining => _stopShells ? (_role == InsertRole ? Math.Min( 1, _shellsLeft ) : 0) : _shellsLeft;
+
+    /// <summary>One shell went in (add it to your ammo).</summary>
+    public event Action ShellInserted;
+
+    /// <summary>Ends a shell reload after the shell being inserted (firing does this too).</summary>
+    public void StopReload()
+    {
+        if ( _shellReload )
+            _stopShells = true;
+    }
+
+    private bool _shellReload;
+    private bool _stopShells;
+    private int _shellsLeft;
+
     /// <summary>An action started (fire, reload, draw...), from the character's animgraph or <see cref="Play"/>.</summary>
     public event Action<string> ActionStarted;
 
@@ -208,7 +237,15 @@ public sealed class WeaponHold : Component
         RefreshData();
         _paused = false;
         _started = true;
-        StartAction( NormalizeRole( role ), ResolveWeapon( ResolveBody() ) );
+        role = NormalizeRole( role );
+        // A reload on a weapon with a shell-by-shell reload runs it (start, shells, end).
+        if ( role is "reload" or "tacticalreload" or "emptyreload" && HasClip( InsertRole ) && !HasClip( role ) )
+        {
+            if ( ShellsToLoad <= 0 )
+                return;
+            role = HasClip( ReloadStartRole ) ? ReloadStartRole : InsertRole;
+        }
+        StartAction( role, ResolveWeapon( ResolveBody() ) );
     }
 
     /// <summary>
@@ -512,12 +549,41 @@ public sealed class WeaponHold : Component
             return;
         }
 
-        if ( _elapsed >= _duration )
-            StartAction( IdleRole, weapon );
+        if ( _elapsed < _duration )
+            return;
+        // Shell-by-shell reload: start -> one insert per shell -> end.
+        if ( _role == ReloadStartRole )
+        {
+            if ( _shellsLeft > 0 && !_stopShells )
+                StartAction( InsertRole, weapon );
+            else
+                FinishShells( weapon );
+            return;
+        }
+        if ( _role == InsertRole )
+        {
+            _shellsLeft = Math.Max( 0, _shellsLeft - 1 );
+            ShellInserted?.Invoke();
+            if ( _shellsLeft > 0 && !_stopShells )
+                StartAction( InsertRole, weapon );
+            else
+                FinishShells( weapon );
+            return;
+        }
+        StartAction( IdleRole, weapon );
     }
+
+    private void FinishShells( SkinnedModelRenderer weapon )
+    {
+        _shellsLeft = 0;
+        StartAction( HasClip( ReloadEndRole ) ? ReloadEndRole : IdleRole, weapon );
+    }
+
+    private bool HasClip( string role ) => _actions.TryGetValue( role, out var a ) && !string.IsNullOrEmpty( a.Sequence );
 
     private void StartAction( string role, SkinnedModelRenderer weapon )
     {
+        ShellReloadState( role );
         _role = role;
         _elapsed = 0f;
         _sinceAction = 0f;
@@ -528,6 +594,33 @@ public sealed class WeaponHold : Component
         BeginOverlay( role, info );
         if ( role != IdleRole )
             ActionStarted?.Invoke( role );
+    }
+
+    /// <summary>
+    /// Shell reload bookkeeping as actions change, and the character's own shell reload: the
+    /// citizen/human graph plays its loading loop while b_reloading is on, one shell per
+    /// b_reloading_insert.
+    /// </summary>
+    private void ShellReloadState( string role )
+    {
+        var body = ResolveBody();
+        bool shellPart = role is ReloadStartRole or InsertRole;
+        if ( shellPart && !_shellReload )
+        {
+            _shellReload = true;
+            _stopShells = false;
+            _shellsLeft = Math.Max( 0, ShellsToLoad );
+            if ( body.IsValid() )
+                body.Set( "b_reloading", true );
+        }
+        if ( role == InsertRole && body.IsValid() )
+            body.Set( "b_reloading_insert", true );
+        if ( !shellPart && _shellReload )
+        {
+            _shellReload = false;
+            if ( body.IsValid() )
+                body.Set( "b_reloading", false );
+        }
     }
 
     private void BeginOverlay( string role, ActionInfo info )
@@ -605,6 +698,16 @@ public sealed class WeaponHold : Component
         }
 
         if ( best == null )
+            return;
+
+        // During a shell reload: another reload is ignored; firing ends it after this shell.
+        if ( _shellReload )
+        {
+            if ( best.Role is FireRole or AimedFireRole )
+                StopReload();
+            return;
+        }
+        if ( string.IsNullOrEmpty( best.Role ) )
             return;
 
         // A shorter action does not cut a longer one that is still running (fire during reload).
@@ -938,9 +1041,11 @@ public sealed class WeaponHold : Component
     /// </summary>
     private string ChooseRole( TriggerBinding binding )
     {
+        // Shell-by-shell reload when the weapon has an insert clip (and shells to load).
+        if ( binding.Roles.Contains( InsertRole ) && HasClip( InsertRole ) )
+            return ShellsToLoad <= 0 ? "" : HasClip( ReloadStartRole ) ? ReloadStartRole : InsertRole;
         if ( binding.Roles.Count == 1 )
             return binding.Roles[0];
-        bool HasClip( string role ) => _actions.TryGetValue( role, out var a ) && !string.IsNullOrEmpty( a.Sequence );
         if ( Aiming && binding.Roles.Contains( AimedFireRole ) && HasClip( AimedFireRole ) )
             return AimedFireRole;
         foreach ( var plain in PlainRoles )

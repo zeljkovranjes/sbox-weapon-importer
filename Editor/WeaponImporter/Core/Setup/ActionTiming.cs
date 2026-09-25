@@ -15,7 +15,8 @@ public static class ActionTiming
     public static float Seconds(WeaponSetup setup, WeaponAsset? asset, AnimationRole role)
     {
         // The character drives actions it triggers itself; the weapon clip is stretched to fit.
-        if (AnimationRoles.GraphTrigger(role) is not null && setup.ActionSeconds.TryGetValue(role, out var measured) && measured > 0.05f)
+        // Shell-reload parts keep their own clip lengths (the reload is as long as its shells).
+        if (AnimationRoles.GraphTrigger(role) is not null && !AnimationRoles.IsShellReload(role) && setup.ActionSeconds.TryGetValue(role, out var measured) && measured > 0.05f)
             return measured;
         if (setup.WeaponAnimations.TryGetValue(role, out var binding) && asset?.FindClip(binding.Clip) is { Duration: > 0.01f } clip)
             return MathF.Max(clip.Duration, 0.05f);
@@ -30,6 +31,8 @@ public static class ActionTiming
         AnimationRole.Holster => 0.6f,
         AnimationRole.Melee => 0.8f,
         AnimationRole.Bolt => 0.9f,
+        AnimationRole.ReloadStart or AnimationRole.ReloadEnd => 0.6f,
+        AnimationRole.ReloadInsert => 0.5f,
         _ => 1f,
     };
 

@@ -34,7 +34,11 @@ public static class AnimationClassifier
 
         new(AnimationRole.EmptyReload, new[] { "reload", "rld", "reloading" }, new[] { "reloadempty", "emptyreload", "reloadlong", "reloaddry", "reloadfull" }, Requires: new[] { "empty", "dry", "long", "full", "outofammo" }, Weight: 1.3f),
         new(AnimationRole.TacticalReload, new[] { "reload", "rld", "reloading" }, new[] { "reloadtac", "tacreload", "reloadtactical", "tacticalreload", "reloadshort", "reloadpartial" }, Requires: new[] { "tac", "tactical", "short", "partial", "fast", "speed" }, Weight: 1.3f),
-        new(AnimationRole.Reload, new[] { "reload", "rld", "reloading", "magswap", "magchange" }, Excludes: new[] { "start", "end", "loop", "insert" }),
+        new(AnimationRole.Reload, new[] { "reload", "rld", "reloading", "magswap", "magchange" }, Excludes: new[] { "start", "end", "loop", "insert", "begin", "enter", "finish", "exit", "shell", "single" }),
+        // Shell-by-shell reloads (shotguns, tube-fed rifles): start / one shell / end.
+        new(AnimationRole.ReloadStart, new[] { "start", "begin", "enter", "open", "in", "intro" }, new[] { "reloadstart", "startreload", "reloadbegin", "reloadenter", "reloadopen", "reloadintro" }, Requires: new[] { "reload", "rld", "reloading", "load", "loading" }, Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
+        new(AnimationRole.ReloadInsert, new[] { "insert", "loop", "shell", "single", "load", "inserting" }, new[] { "reloadinsert", "insertshell", "shellinsert", "reloadloop", "loadshell", "shellload", "reloadshell", "reloadsingle", "insertround", "loadround" }, Requires: new[] { "reload", "rld", "reloading", "insert", "shell", "round", "load" }, Excludes: new[] { "start", "begin", "end", "finish", "exit", "fire", "shoot" }, Weight: 1.3f),
+        new(AnimationRole.ReloadEnd, new[] { "end", "finish", "exit", "close", "out", "outro", "stop" }, new[] { "reloadend", "endreload", "reloadfinish", "reloadexit", "reloadclose", "reloadoutro" }, Requires: new[] { "reload", "rld", "reloading", "load", "loading" }, Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
 
         new(AnimationRole.Unjam, new[] { "unjam", "clear", "clearjam", "fixjam", "malfunctionclear", "tapack", "remedy" }, new[] { "unjam", "clearjam", "fixjam", "jamclear", "jamfix" }, Weight: 1.3f),
         new(AnimationRole.Jam, new[] { "jam", "jammed", "malfunction", "misfire", "stovepipe" }, Excludes: new[] { "clear", "fix", "un" }),

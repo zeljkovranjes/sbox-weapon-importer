@@ -89,6 +89,7 @@ public sealed class WeaponViewmodel : Component
         if ( !renderer.IsValid() )
             return;
         Listen( Hold );
+        DriveShellReload( renderer );
         if ( UsesGraph && renderer.UseAnimGraph )
             renderer.Set( "ironsights", Hold.IsValid() && Hold.Aiming ? 1 : 0 );
         var camera = Scene.Camera;
@@ -145,6 +146,11 @@ public sealed class WeaponViewmodel : Component
                 renderer.Set( "b_empty", role == "emptyreload" );
                 renderer.Set( "b_reload", true );
                 break;
+            case "reloadstart":
+            case "reloadinsert":
+                // Shell reload: DriveShellReload keeps b_reload on while more shells follow.
+                renderer.Set( "b_reload", true );
+                break;
             case "inspect":
                 renderer.Set( "b_inspect", true );
                 break;
@@ -158,6 +164,31 @@ public sealed class WeaponViewmodel : Component
     }
 
     protected override void OnDestroy() => Listen( null );
+
+    private bool _drivingShells;
+
+    /// <summary>
+    /// Shell-by-shell reloads: the graph loops its insert while b_reload stays on, so it is held
+    /// exactly while another shell follows the current one, then released for the end part.
+    /// </summary>
+    private void DriveShellReload( SkinnedModelRenderer renderer )
+    {
+        if ( !UsesGraph || !Hold.IsValid() )
+            return;
+        if ( Hold.ShellReloading )
+        {
+            _drivingShells = true;
+            // Held at the start of each insert too, so the graph always enters the reload; it only
+            // reads b_reload again when the insert finishes.
+            var more = Hold.CurrentRole == "reloadstart" ? Hold.ShellsRemaining > 0 : Hold.ShellsRemaining > 1 || Hold.CurrentTime < 0.25f;
+            renderer.Set( "b_reload", more );
+        }
+        else if ( _drivingShells )
+        {
+            _drivingShells = false;
+            renderer.Set( "b_reload", false );
+        }
+    }
 
     /// <summary>Lowers the camera's near clip while the view shows, and restores it afterwards.</summary>
     private void SetNearClip( CameraComponent camera )
