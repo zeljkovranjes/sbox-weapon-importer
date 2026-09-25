@@ -77,7 +77,10 @@ public static class WeaponGraphGenerator
         AnimationRole.Inspect => Slot.Inspect,
         AnimationRole.Sprint => Slot.Sprint,
         AnimationRole.Walk => Slot.Walk,
-        AnimationRole.Ads => Slot.AdsIdle,
+        // ADS raises the sights: the graph's "Aim" state plays it and holds its last frame.
+        AnimationRole.Ads => Slot.AdsIn,
+        AnimationRole.AdsOut => Slot.AdsOut,
+        AnimationRole.AdsIdle => Slot.AdsIdle,
         AnimationRole.AdsFire => Slot.FireAds,
         AnimationRole.Melee => Slot.Melee,
         AnimationRole.Bolt => Slot.Bolt,

@@ -141,20 +141,17 @@ public sealed class AnimationsStep : StepPanel
 		C.SelectRole( role );
 		var s = C.Setup;
 		s.WeaponAnimations.TryGetValue( role, out var binding );
-		var menu = new Menu( this );
-		menu.AddHeading( $"Weapon clip for {AnimationRoles.Label( role )}" );
-		var clips = C.Analysis.Asset.Clips;
-		foreach ( var clip in clips )
+		// Search list: every clip in the file, the ones that look like this role first.
+		var items = new List<PickerItem>();
+		foreach ( var clip in C.Analysis.Asset.Clips )
 		{
-			var name = clip.Name;
-			var guess = C.Analysis.Animations.FirstOrDefault( g => g.Animation == name );
-			var label = guess is not null && guess.Role != AnimationRole.Unknown ? $"{name}   ({AnimationRoles.Label( guess.Role )}?)" : name;
-			menu.AddOption( $"{label}  ·  {clip.Duration:0.00} s", binding?.Clip == name ? "check" : "movie", () => SetClip( role, name ) );
+			var guess = C.Analysis.Animations.FirstOrDefault( g => g.Animation == clip.Name );
+			var suggested = guess is not null && guess.Role == role;
+			var looksLike = guess is not null && guess.Role != AnimationRole.Unknown ? $"{AnimationRoles.Label( guess.Role )}? · " : "";
+			items.Add( new PickerItem( clip.Name, clip.Name, $"{looksLike}{clip.Duration:0.00} s", suggested, binding?.Clip == clip.Name ) );
 		}
-		if ( clips.Count > 0 )
-			menu.AddSeparator();
-		menu.AddOption( "None", binding is null ? "check" : "block", () => SetClip( role, null ) );
-		menu.OpenAtCursor();
+		items.Add( new PickerItem( "", "None", "no weapon clip", Current: binding is null || string.IsNullOrEmpty( binding.Clip ) ) );
+		new SearchPicker( this, $"Weapon clip for {AnimationRoles.Label( role )}", items, name => SetClip( role, string.IsNullOrEmpty( name ) ? null : name ) ).Open();
 	}
 
 	private void SetClip( AnimationRole role, string clip )

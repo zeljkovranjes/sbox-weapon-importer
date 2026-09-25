@@ -23,6 +23,10 @@ public enum AnimationRole
     Bolt,
     Jam,
     Unjam,
+    /// <summary>Lowering the sights (played when aiming stops).</summary>
+    AdsOut,
+    /// <summary>Looping aimed pose (while aiming, after ADS raised the sights).</summary>
+    AdsIdle,
 }
 
 public static class AnimationRoles
@@ -32,7 +36,7 @@ public static class AnimationRoles
     {
         AnimationRole.Idle, AnimationRole.Fire, AnimationRole.FireEmpty, AnimationRole.Reload,
         AnimationRole.TacticalReload, AnimationRole.EmptyReload, AnimationRole.Draw, AnimationRole.Holster,
-        AnimationRole.Inspect, AnimationRole.Sprint, AnimationRole.Walk, AnimationRole.Ads, AnimationRole.AdsFire,
+        AnimationRole.Inspect, AnimationRole.Sprint, AnimationRole.Walk, AnimationRole.Ads, AnimationRole.AdsIdle, AnimationRole.AdsOut, AnimationRole.AdsFire,
         AnimationRole.Melee, AnimationRole.Bolt, AnimationRole.Jam, AnimationRole.Unjam,
     };
 
@@ -45,13 +49,19 @@ public static class AnimationRoles
         AnimationRole.TacticalReload => "Tactical Reload",
         AnimationRole.EmptyReload => "Empty Reload",
         AnimationRole.Ads => "ADS",
+        AnimationRole.AdsOut => "ADS Out",
+        AnimationRole.AdsIdle => "ADS Idle",
         AnimationRole.AdsFire => "ADS Fire",
         AnimationRole.Bolt => "Bolt / Charge",
         _ => role.ToString(),
     };
 
+    /// <summary>
+    /// Roles that cycle. ADS is not one: it raises the sights and the aimed pose is held at its
+    /// last frame while the player aims (Weapon Hold's Aiming).
+    /// </summary>
     public static bool Loops(AnimationRole role)
-        => role is AnimationRole.Idle or AnimationRole.Sprint or AnimationRole.Walk or AnimationRole.Ads;
+        => role is AnimationRole.Idle or AnimationRole.Sprint or AnimationRole.Walk or AnimationRole.AdsIdle;
 
     /// <summary>Role the given one falls back to when it has no clip (empty reload plays reload).</summary>
     public static AnimationRole? Fallback(AnimationRole role) => role switch

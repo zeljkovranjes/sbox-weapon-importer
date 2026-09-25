@@ -22,8 +22,12 @@ Everything goes to `Assets/weapons/<name>/`. Put `<name>.prefab` under your play
   weapon's animations when the character attacks, reloads or deploys.
 - **First person:** when the file has its own arms, the prefab also carries `<name>_fp.vmdl` (arms,
   weapon and animations as authored). **Weapon Viewmodel** shows it to the player holding the
-  weapon, at their camera, in sync with the third-person hold. Turn off `FirstPerson` on it when
-  your camera is in third person.
+  weapon, at their camera, and plays its generated animgraph: fire, reload, inspect and holster
+  follow the third-person hold, and setting `Aiming` on Weapon Hold raises and lowers the sights.
+  Turn off `FirstPerson` on it when your camera is in third person.
+
+Clips are recognised by name (idle, fire, reload, draw, aim in/out...). Anything that isn't can be
+assigned on the **Animations** page: click a row and search for the clip.
 
 ## Requirements
 

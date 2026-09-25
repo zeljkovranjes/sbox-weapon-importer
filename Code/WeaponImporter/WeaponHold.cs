@@ -111,6 +111,15 @@ public sealed class WeaponHold : Component
     /// <summary>Current support-hand IK weight (0 = animated, 1 = on the weapon).</summary>
     public float LeftWeight { get; private set; }
 
+    /// <summary>
+    /// The player is aiming down the sights. Set it from your input; the first-person viewmodel
+    /// raises the sights, holds them and lowers them again through its animgraph.
+    /// </summary>
+    [Property] public bool Aiming { get; set; }
+
+    /// <summary>An action started (fire, reload, draw...), from the character's animgraph or <see cref="Play"/>.</summary>
+    public event Action<string> ActionStarted;
+
     /// <summary>Current action role ("idle" when no action runs).</summary>
     public string CurrentRole => _role;
 
@@ -515,6 +524,8 @@ public sealed class WeaponHold : Component
         _actions.TryGetValue( role, out var info );
         _duration = PlayWeaponSequence( weapon, info, role == IdleRole, 0f, paused: false );
         BeginOverlay( role, info );
+        if ( role != IdleRole )
+            ActionStarted?.Invoke( role );
     }
 
     private void BeginOverlay( string role, ActionInfo info )

@@ -44,6 +44,10 @@ public sealed class WeaponViewmodel : Component
     [Property] public float NearClip { get; set; } = 1f;
 
     private string _sequence = "";
+    private WeaponHold _listening;
+
+    /// <summary>The viewmodel plays its own animgraph (the importer generates one when the file has an idle).</summary>
+    public bool UsesGraph => Renderer.IsValid() && Renderer.Model?.AnimGraph is not null;
     private bool _detached;
     private bool _showing;
     private CameraComponent _nearCamera;
@@ -73,6 +77,9 @@ public sealed class WeaponViewmodel : Component
         var renderer = Renderer;
         if ( !renderer.IsValid() )
             return;
+        Listen( Hold );
+        if ( UsesGraph && renderer.UseAnimGraph )
+            renderer.Set( "ironsights", Hold.IsValid() && Hold.Aiming ? 1 : 0 );
         var camera = Scene.Camera;
         _showing = FirstPerson && Hold.IsValid() && Hold.Active && !Hold.IsProxy && camera.IsValid();
         renderer.Enabled = _showing;
@@ -86,6 +93,55 @@ public sealed class WeaponViewmodel : Component
         if ( _showing && Scene.Camera.IsValid() )
             UpdateView( Scene.Camera.WorldTransform );
     }
+
+    /// <summary>Hears the hold's actions (the graph plays them on the viewmodel).</summary>
+    private void Listen( WeaponHold hold )
+    {
+        if ( _listening == hold )
+            return;
+        if ( _listening.IsValid() )
+            _listening.ActionStarted -= OnActionStarted;
+        _listening = hold;
+        if ( hold.IsValid() )
+            hold.ActionStarted += OnActionStarted;
+    }
+
+    /// <summary>
+    /// The hold started an action: the viewmodel's graph gets the matching parameter (the
+    /// importer's generated graphs use these names; so do Facepunch's first-person graphs).
+    /// </summary>
+    private void OnActionStarted( string role )
+    {
+        var renderer = Renderer;
+        if ( !UsesGraph || !renderer.IsValid() )
+            return;
+        renderer.UseAnimGraph = true;
+        switch ( role )
+        {
+            case "fire":
+            case "adsfire":
+            case "fireempty":
+                renderer.Set( "b_attack", true );
+                break;
+            case "reload":
+            case "tacticalreload":
+            case "emptyreload":
+                renderer.Set( "b_empty", role == "emptyreload" );
+                renderer.Set( "b_reload", true );
+                break;
+            case "inspect":
+                renderer.Set( "b_inspect", true );
+                break;
+            case "holster":
+                renderer.Set( "b_holster", true );
+                break;
+            case "draw":
+                renderer.Set( "b_holster", false );
+                break;
+        }
+    }
+
+    protected override void OnDestroy() => Listen( null );
 
     /// <summary>Lowers the camera's near clip while the view shows, and restores it afterwards.</summary>
     private void SetNearClip( CameraComponent camera )
@@ -125,9 +181,17 @@ public sealed class WeaponViewmodel : Component
     /// <summary>The sequence the view plays (follows the hold's current action).</summary>
     public string PlayingSequence => _sequence;
 
-    /// <summary>Plays the hold's current action at the hold's own time.</summary>
+    /// <summary>
+    /// Without a graph: plays the hold's current action at the hold's own time. With one, the
+    /// graph plays (actions arrive through <see cref="OnActionStarted"/>).
+    /// </summary>
     private void Animate( SkinnedModelRenderer renderer )
     {
+        if ( UsesGraph )
+        {
+            renderer.UseAnimGraph = true;
+            return;
+        }
         if ( !Hold.IsValid() )
             return;
         var sequence = Hold.SequenceFor( Hold.CurrentRole );
