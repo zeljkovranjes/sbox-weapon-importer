@@ -218,6 +218,9 @@ public sealed class HandsStep : StepPanel
 
 	// ------------------------------------------------------------------ hand cards
 
+	/// <summary>How far one Move click moves a hand.</summary>
+	private const float MoveInches = 0.1f;
+
 	private void BuildHand( Side side )
 	{
 		var s = C.Setup;
@@ -275,6 +278,24 @@ public sealed class HandsStep : StepPanel
 		}
 		source.AddItem( "Procedural fit", "gesture", () => SetPreset( side, ChoiceGripGenerator.Procedural ), description: "Close the fingers around the surface from scratch", selected: chosen == ChoiceGripGenerator.Procedural );
 		source.AddItem( "Pick on the weapon…", "ads_click", () => C.BeginPick( target ), description: "Then click on the weapon where this hand should hold it" );
+
+		// Move just the hand (grip shape, fingers and wrist angle unchanged). Dragging the hand's
+		// dot in the preview slides it along the surface instead.
+		var moveRow = UiStyle.FieldRow( card, card.Layout, "Move", "Move only this hand on the weapon; everything else stays as it is. Auto Grip undoes it." );
+		foreach ( var (icon, delta, tip) in new[]
+		{
+			("arrow_forward", new System.Numerics.Vector3( MoveInches, 0, 0 ), "Forward, toward the muzzle"),
+			("arrow_back", new System.Numerics.Vector3( -MoveInches, 0, 0 ), "Back, toward the stock"),
+			("arrow_upward", new System.Numerics.Vector3( 0, 0, MoveInches ), "Up, toward the top of the gun"),
+			("arrow_downward", new System.Numerics.Vector3( 0, 0, -MoveInches ), "Down"),
+			("west", new System.Numerics.Vector3( 0, MoveInches, 0 ), "To the weapon's left"),
+			("east", new System.Numerics.Vector3( 0, -MoveInches, 0 ), "To the weapon's right"),
+		} )
+		{
+			var d = delta;
+			moveRow.Add( UiStyle.Icon( card, icon, () => C.MoveHand( side, d ), $"{tip} ({MoveInches} in)" ) );
+		}
+		moveRow.AddStretchCell();
 
 		var surface = UiStyle.FieldRow( card, card.Layout, "Surface", "The part of the weapon this hand holds, as measured" ).Add( UiStyle.Muted( new Label( "", card ) { WordWrap = true, MinimumWidth = 20 }, small: true ), 1 );
 		var detail = UiStyle.FieldRow( card, card.Layout, "Grasp", "Fingers touching the weapon, fingers in the air, and how deep the hand passes into it" ).Add( UiStyle.Muted( new Label( "", card ) { WordWrap = true, MinimumWidth = 20 }, small: true ), 1 );

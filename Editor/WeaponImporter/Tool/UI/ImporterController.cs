@@ -520,6 +520,22 @@ public sealed class ImporterController : IDisposable
 	public const float DragFitInterval = 0.06f;
 
 	/// <summary>A grip contact dragged across the weapon: the marker follows now, the hand within a few frames.</summary>
+	/// <summary>
+	/// Moves a hand on the weapon without changing anything else: the grip shape, fingers and
+	/// wrist angle stay, only the hand moves by <paramref name="delta"/> (weapon space, inches:
+	/// +X toward the muzzle, +Y left, +Z up). Kept as a hand edit; Auto Grip forgets it.
+	/// </summary>
+	public void MoveHand( Side side, N.Vector3 delta )
+	{
+		var session = Session;
+		var pose = side == Side.Right ? session?.Grip?.Right : session?.Grip?.Left;
+		if ( pose is null || Busy )
+			return;
+		var moved = pose.Clone();
+		moved.Wrist = new XForm( moved.Wrist.Pos + delta, moved.Wrist.Rot );
+		LiveRefit( side, moved );
+	}
+
 	public void DragGrip( Side side, N.Vector3 point, N.Vector3 normal )
 	{
 		var grip = side == Side.Right ? Setup?.Primary : Setup?.Support;

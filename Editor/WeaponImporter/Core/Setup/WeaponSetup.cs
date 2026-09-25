@@ -82,6 +82,12 @@ public sealed class WeaponSetup
     public string ActionSecondsKey { get; set; } = "";
 
     /// <summary>
+    /// Also bake the first-person viewmodel (<c>&lt;name&gt;_fp.vmdl</c>: the file's own arms,
+    /// weapon and camera with every animation as authored) when the file has first-person arms.
+    /// </summary>
+    public bool ExportFirstPerson { get; set; } = true;
+
+    /// <summary>
     /// Third-person reloads move the support hand onto this weapon's magazine where the
     /// character's reload works its own (off by default: the hand follows the animation).
     /// </summary>

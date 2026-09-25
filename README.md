@@ -11,13 +11,19 @@ and bake a game-ready prefab.
 4. Press **Bake**.
 
 The importer sets up the weapon type, grips, animations and textures automatically. Pick another
-grip, character or hold from the dropdowns, or drag a hand across the weapon in the preview.
+grip, character or hold from the dropdowns, drag a hand across the weapon in the preview, or nudge
+a hand with its **Move** arrows.
 
 ## Output
 
-Everything goes to `Assets/weapons/<name>/`. Put `<name>.prefab` under your player: its
-**Weapon Hold** component keeps the hands on the weapon and plays the weapon's animations when the
-character attacks, reloads or deploys.
+Everything goes to `Assets/weapons/<name>/`. Put `<name>.prefab` under your player:
+
+- **Third person:** its **Weapon Hold** keeps the character's hands on the weapon and plays the
+  weapon's animations when the character attacks, reloads or deploys.
+- **First person:** when the file has its own arms, the prefab also carries `<name>_fp.vmdl` (arms,
+  weapon and animations as authored). **Weapon Viewmodel** shows it to the player holding the
+  weapon, at their camera, in sync with the third-person hold. Turn off `FirstPerson` on it when
+  your camera is in third person.
 
 ## Requirements
 

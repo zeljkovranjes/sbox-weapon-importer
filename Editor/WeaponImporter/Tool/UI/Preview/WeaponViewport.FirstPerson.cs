@@ -23,6 +23,7 @@ public sealed partial class WeaponViewport
 	private WeaponAnalysis _fpAnalysis;
 	private XForm[] _fpInverseRest;
 	private int _fpCameraBone = -1;
+	private Material[] _fpMaterials;
 	private int _fpFrame = -1;
 	private CoreClip _fpClip;
 
@@ -95,9 +96,10 @@ public sealed partial class WeaponViewport
 	private void EnsureFirstPersonPieces()
 	{
 		var analysis = _c.Analysis;
-		if ( analysis is null || ReferenceEquals( analysis, _fpAnalysis ) && _fpRoot.IsValid() )
+		if ( analysis is null || ReferenceEquals( analysis, _fpAnalysis ) && ReferenceEquals( _fpMaterials, _materials ) && _fpRoot.IsValid() )
 			return;
 		_fpAnalysis = analysis;
+		_fpMaterials = _materials;
 		_fpRoot?.Destroy();
 		_fpPieces.Clear();
 		_fpRoot = new GameObject( true, "first person" );
@@ -105,32 +107,12 @@ public sealed partial class WeaponViewport
 		var asset = analysis.Asset;
 		var mesh = asset.Mesh;
 		var skeleton = asset.Skeleton;
-		var byBone = new Dictionary<int, List<int>>();
-		var step = Math.Max( 1, (mesh.TriangleCount + MaxFirstPersonTriangles - 1) / MaxFirstPersonTriangles );
-		// Scene dressing in the file (a floor or backdrop plane) is a few huge triangles; nothing
-		// on the weapon or the arms is anywhere near that size.
-		var maxEdge = MathF.Max( 40f, 2f * analysis.WeaponBounds.Size.X );
-		for ( var t = 0; t < mesh.TriangleCount; t += step )
-		{
-			var (a, b, c) = mesh.Triangle( t );
-			if ( MathF.Max( System.Numerics.Vector3.Distance( a, b ), MathF.Max( System.Numerics.Vector3.Distance( b, c ), System.Numerics.Vector3.Distance( c, a ) ) ) > maxEdge )
-				continue;
-			var bone = Math.Clamp( mesh.TriangleBone( t ), 0, Math.Max( 0, skeleton.Count - 1 ) );
-			if ( !byBone.TryGetValue( bone, out var list ) )
-				byBone[bone] = list = new List<int>();
-			list.Add( t );
-		}
-		// Without a rig camera the file is a full character: show it as a viewmodel (weapon,
-		// forearms and hands) so the body doesn't block the view.
-		var hasCamera = Enumerable.Range( 0, skeleton.Count ).Any( i => skeleton[i].Name.Contains( "camera", StringComparison.OrdinalIgnoreCase ) );
-		if ( !hasCamera && byBone.Keys.Any( b => !IsBodyBone( skeleton, b ) ) )
-			foreach ( var body in byBone.Keys.Where( b => IsBodyBone( skeleton, b ) ).ToList() )
-				byBone.Remove( body );
+		var byBone = WeaponImporter.Core.Rig.ViewmodelParts.TrianglesByBone( analysis, Math.Max( 1, (mesh.TriangleCount + MaxFirstPersonTriangles - 1) / MaxFirstPersonTriangles ) );
 		foreach ( var (bone, triangles) in byBone )
 		{
 			var piece = new GameObject( _fpRoot, true, skeleton.Count > 0 ? skeleton[bone].Name : "mesh" );
 			var renderer = piece.AddComponent<ModelRenderer>();
-			renderer.Model = PreviewModels.Build( mesh, triangles, PreviewModels.SurfaceMaterial );
+			renderer.Model = PreviewModels.Build( mesh, triangles, _materials );
 			_fpPieces.Add( (bone, piece) );
 		}
 
@@ -168,40 +150,7 @@ public sealed partial class WeaponViewport
 			: analysis.WeaponTriangles.GroupBy( t => Math.Clamp( mesh.TriangleBone( t ), 0, skeleton.Count - 1 ) ).MaxBy( g => g.Count() )!.Key;
 	}
 
-	private static readonly HashSet<string> BodyTokens = new( StringComparer.OrdinalIgnoreCase )
-	{
-		"spine", "neck", "head", "pelvis", "hip", "hips", "thigh", "leg", "shin", "calf", "knee", "foot",
-		"toe", "toes", "heel", "eye", "eyes", "jaw", "teeth", "tongue", "breast", "chest", "torso",
-		"shoulder", "clavicle", "upperarm", "forehead", "brow", "lid", "ear", "nose", "cheek", "lip",
-		"lips", "chin", "hair", "face", "belly", "butt", "root",
-	};
-
-	/// <summary>
-	/// Bones of the character's body other than the forearms and hands, by whole name tokens
-	/// ("DEF-spine.003", "mixamorig:LeftUpLeg", "upper_arm.L"), so weapon parts such as "Slide" or
-	/// "RearSight" never match.
-	/// </summary>
-	private static bool IsBodyBone( WeaponImporter.Core.Rig.Skeleton skeleton, int bone )
-	{
-		if ( skeleton.Count == 0 )
-			return false;
-		var name = skeleton[bone].Name;
-		var leaf = name[(name.LastIndexOfAny( new[] { ':', '|', '/' } ) + 1)..];
-		var words = System.Text.RegularExpressions.Regex.Matches( leaf, "[A-Z]?[a-z]+|[A-Z]+(?![a-z])" ).Select( m => m.Value.ToLowerInvariant() ).ToList();
-		if ( words.Count == 0 )
-			return false;
-		// A lone "root" is usually the weapon's own root; only a character's root counts.
-		if ( words.Count == 1 && words[0] == "root" )
-			return false;
-		for ( var i = 0; i < words.Count; i++ )
-		{
-			if ( BodyTokens.Contains( words[i] ) && words[i] != "root" )
-				return true;
-			if ( i + 1 < words.Count && (words[i] + words[i + 1] is "upperarm" or "armupper" or "upleg") )
-				return true;
-		}
-		return false;
-	}
+	private static bool IsBodyBone( WeaponImporter.Core.Rig.Skeleton skeleton, int bone ) => WeaponImporter.Core.Rig.ViewmodelParts.IsBodyBone( skeleton, bone );
 
 	/// <summary>One first-person frame: advance time, pose the pieces, place the camera.</summary>
 	private void TickFirstPerson( float dt )

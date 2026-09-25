@@ -117,6 +117,12 @@ public sealed class WeaponHold : Component
     /// <summary>Normalized time (0..1) of the current action.</summary>
     public float CurrentTime => _duration > 0f ? Math.Clamp( _elapsed / _duration, 0f, 1f ) : 0f;
 
+    /// <summary>The weapon renderer the hold moves (<see cref="Weapon"/>, else the one on this object).</summary>
+    public SkinnedModelRenderer WeaponRenderer => Weapon.IsValid() ? Weapon : Components.Get<SkinnedModelRenderer>( FindMode.EnabledInSelf );
+
+    /// <summary>Weapon sequence of an action role ("" when it has none).</summary>
+    public string SequenceFor( string role ) => role != null && _actions.TryGetValue( role, out var info ) ? info.Sequence : "";
+
     /// <summary>Inches the right wrist stayed short of its target on the last update.</summary>
     public float RightShortfall { get; private set; }
 
@@ -146,6 +152,11 @@ public sealed class WeaponHold : Component
     private readonly CharacterOverlay _overlay = new();
     private OverlayInfo _activeOverlay;
     private readonly List<BoneCollection.Bone> _upperBones = new();
+
+    // Pelvis-to-head chain (and the spine under the clavicles): pinned to their animation pose
+    // whenever arm overrides force the skeleton to be evaluated again, which otherwise leans the
+    // citizen/human spine back and tips the head up.
+    private readonly List<BoneCollection.Bone> _postureBones = new();
     private bool _parsedOnce;
     private Transform _weaponInHold = global::Transform.Zero;
     private Transform _rightHand = global::Transform.Zero;
@@ -431,9 +442,16 @@ public sealed class WeaponHold : Component
         }
 
         // Overrides only take effect when the skeleton is evaluated; the animation update has
-        // already run this frame, so evaluate again (no time advance) to show them now.
+        // already run this frame, so evaluate again (no time advance) to show them now. That
+        // evaluation bends the spine differently, so the posture chain keeps this frame's pose.
         if ( sceneModel.HasBoneOverrides() )
+        {
+            if ( !(_overlay.Active && _overlay.Weight > 1e-4f) )
+                foreach ( var bone in _postureBones )
+                    if ( TryGetAnim( body, bone, out var w ) )
+                        sceneModel.SetBoneOverride( bone.Index, bodyTx.ToLocal( w ) );
             sceneModel.Update( 0f );
+        }
 
         _snap = false;
     }
@@ -706,6 +724,24 @@ public sealed class WeaponHold : Component
                         stack.Push( child );
             }
         }
+
+        // Posture chain: every ancestor of the head and of the arms (not the root, not the arms).
+        _postureBones.Clear();
+        var posture = new HashSet<int>();
+        var armBones = new HashSet<int>();
+        _rightChain?.Collect( armBones );
+        _leftChain?.Collect( armBones );
+        void Climb( BoneCollection.Bone bone )
+        {
+            for ( var b = bone; b != null && b.Parent != null; b = b.Parent )
+                if ( !armBones.Contains( b.Index ) && posture.Add( b.Index ) )
+                    _postureBones.Add( b );
+        }
+        if ( bones.GetBone( "head" ) is { } head )
+            Climb( head );
+        foreach ( var name in new[] { "arm_upper_R", "arm_upper_L" } )
+            if ( bones.GetBone( name )?.Parent is { } shoulder )
+                Climb( shoulder );
 
         MapFingers();
         return _holdBone != null;

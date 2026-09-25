@@ -29,26 +29,30 @@ public static partial class WeaponBaker
         result.TextFiles.Add( (result.MeshFile, dmx.Text) );
 
         var materialsFolder = $"{folder}/materials";
-        foreach ( var (dmxMaterial, material) in dmx.Materials )
+        void Materials( ModelDmxResult model, List<(string From, string To)> remaps )
         {
-            var output = MaterialWriter.Write( material, materialsFolder, dmxMaterial );
-            var pending = MaterialWriter.WriteFiles( output, assetsRoot );
-            foreach ( var (absolute, source, channel) in pending )
+            foreach ( var (dmxMaterial, material) in model.Materials )
             {
-                try
+                var output = MaterialWriter.Write( material, materialsFolder, dmxMaterial );
+                var pending = MaterialWriter.WriteFiles( output, assetsRoot );
+                foreach ( var (absolute, source, channel) in pending )
                 {
-                    SplitChannel( source, channel, absolute );
+                    try
+                    {
+                        SplitChannel( source, channel, absolute );
+                    }
+                    catch ( Exception e )
+                    {
+                        result.Notes.Add( $"Couldn't extract the {channel} channel of {source.Name}: {e.Message}" );
+                    }
                 }
-                catch ( Exception e )
-                {
-                    result.Notes.Add( $"Couldn't extract the {channel} channel of {source.Name}: {e.Message}" );
-                }
+                result.WrittenFiles.Add( output.VmatPath );
+                result.WrittenFiles.AddRange( output.Textures.Select( t => t.RelativePath ) );
+                // ModelDoc names DMX materials after the faceSet material; point them at the generated vmat.
+                remaps.Add( ($"{dmxMaterial}.vmat", output.VmatPath) );
             }
-            result.WrittenFiles.Add( output.VmatPath );
-            result.WrittenFiles.AddRange( output.Textures.Select( t => t.RelativePath ) );
-            // ModelDoc names DMX materials after the faceSet material; point them at the generated vmat.
-            result.MaterialRemaps.Add( ($"{dmxMaterial}.vmat", output.VmatPath) );
         }
+        Materials( dmx, result.MaterialRemaps );
 
         // Clips the setup uses (each only once).
         var used = setup.WeaponAnimations.Values.Select( b => b.Clip ).Where( c => !string.IsNullOrEmpty( c ) ).Distinct().ToList();
@@ -64,6 +68,26 @@ public static partial class WeaponBaker
             var file = $"{generated}/anim_{sequence}.dmx";
             result.TextFiles.Add( (file, AnimationDmxWriter.Write( rig.Asset.Skeleton, clip, DmxSpace.SourceZUpInches, sequence )) );
             result.Clips.Add( new ExportedClip( clipName, sequence, file, clip.FrameCount, clip.Fps ) );
+        }
+
+        // First-person viewmodel (files with their own arms): same clips, everything as authored.
+        if ( setup.ExportFirstPerson && FirstPersonRig.Build( analysis, keep ) is { } fp )
+        {
+            result.FirstPerson = fp;
+            var fpName = $"{name}_fp";
+            var fpDmx = ModelDmxWriter.WriteWithMaterials( fp.Asset, fp.Triangles, DmxSpace.SourceZUpInches, fpName );
+            result.FirstPersonMeshFile = $"{generated}/{fpName}.dmx";
+            result.TextFiles.Add( (result.FirstPersonMeshFile, fpDmx.Text) );
+            Materials( fpDmx, result.FirstPersonMaterialRemaps );
+            foreach ( var clipName in used )
+            {
+                if ( fp.Asset.FindClip( clipName ) is not { FrameCount: > 0 } clip )
+                    continue;
+                var sequence = EngineNames.Sequence( clipName );
+                var file = $"{generated}/fp_anim_{sequence}.dmx";
+                result.TextFiles.Add( (file, AnimationDmxWriter.Write( fp.Asset.Skeleton, clip, DmxSpace.SourceZUpInches, sequence )) );
+                result.FirstPersonClips.Add( new ExportedClip( clipName, sequence, file, clip.FrameCount, clip.Fps ) );
+            }
         }
         return result;
     }

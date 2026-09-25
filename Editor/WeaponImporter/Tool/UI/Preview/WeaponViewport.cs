@@ -126,10 +126,12 @@ public sealed partial class WeaponViewport : SceneRenderingWidget
 		}
 		_weaponObject.Enabled = !OwnArmsView;
 
-		if ( _shownAnalysis != session.Analysis || _shownBaked != _c.BakedModelPath )
+		EnsurePreviewMaterials( session.Analysis );
+		if ( _shownAnalysis != session.Analysis || _shownBaked != _c.BakedModelPath || _shownMaterials != _materials )
 		{
 			_shownAnalysis = session.Analysis;
 			_shownBaked = _c.BakedModelPath;
+			_shownMaterials = _materials;
 			Model weaponModel = null;
 			if ( _shownBaked is not null )
 			{
@@ -137,7 +139,7 @@ public sealed partial class WeaponViewport : SceneRenderingWidget
 				if ( weaponModel is null || weaponModel.IsError )
 					weaponModel = null;
 			}
-			weaponModel ??= PreviewModels.BuildWeaponModel( session.Analysis );
+			weaponModel ??= PreviewModels.BuildWeaponModel( session.Analysis, _materials );
 			_weapon.Model = weaponModel;
 			_holdDirty = true;
 		}
@@ -354,6 +356,40 @@ public sealed partial class WeaponViewport : SceneRenderingWidget
 	}
 
 	/// <summary>Weapon model world transform (model space == canonical space).</summary>
+	// Textured preview materials of the current analysis (null while they load: plain surface).
+	private Material[] _materials;
+	private Material[] _shownMaterials;
+	private Core.Analysis.WeaponAnalysis _materialsFor;
+
+	/// <summary>Starts building the textured materials once per analysis (attached textures included).</summary>
+	private void EnsurePreviewMaterials( Core.Analysis.WeaponAnalysis analysis )
+	{
+		if ( analysis is null || ReferenceEquals( analysis, _materialsFor ) )
+			return;
+		_materialsFor = analysis;
+		_materials = null;
+		var materials = analysis.Asset.Mesh.Materials;
+		if ( materials.Count > 0 )
+			_ = LoadPreviewMaterialsAsync( analysis, materials );
+	}
+
+	private async Task LoadPreviewMaterialsAsync( Core.Analysis.WeaponAnalysis analysis, IReadOnlyList<Core.Geometry.MaterialInfo> materials )
+	{
+		try
+		{
+			var built = await PreviewMaterials.BuildAsync( materials );
+			if ( ReferenceEquals( analysis, _materialsFor ) && this.IsValid() )
+				_materials = built;
+		}
+		catch ( Exception e ) when ( e is not OperationCanceledException )
+		{
+			Log.Warning( $"[weapon importer] preview textures could not be built: {e.Message}" );
+		}
+	}
+
+	/// <summary>Textured materials are shown (tests).</summary>
+	public bool PreviewTextured => _materials is not null && ReferenceEquals( _shownMaterials, _materials );
+
 	public Transform WeaponWorld => OwnArmsView ? FirstPersonWeaponWorld : _weaponObject.IsValid() ? _weaponObject.WorldTransform : Transform.Zero;
 
 	/// <summary>Renders the viewport (with overlays) to a PNG, for the gate and for thumbnails.</summary>

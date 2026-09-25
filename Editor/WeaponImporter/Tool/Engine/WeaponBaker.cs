@@ -18,6 +18,8 @@ public sealed class BakeResult
     public string PrefabPath { get; set; } = "";
     public string ProfilePath { get; set; } = "";
     public string CorrectedModelPath { get; set; } = "";
+    /// <summary>The first-person viewmodel (empty when the file has no first-person arms).</summary>
+    public string FirstPersonModelPath { get; set; } = "";
     /// <summary>The weapon's AnimGraph (empty when there is no idle animation to build it on).</summary>
     public string GraphPath { get; set; } = "";
     public string SetupPath { get; set; } = "";
@@ -134,6 +136,42 @@ public static partial class WeaponBaker
         AssetCompiler.WriteText( modelPath, vmdl.Build() );
         result.Files.Add( modelPath );
 
+        // 2b. First-person viewmodel: the file's own arms, weapon and camera, as authored.
+        if ( exported.FirstPerson is { } fp )
+        {
+            var fpName = $"{name}_fp";
+            var fpModelPath = $"{folder}/{fpName}.vmdl";
+            var fpVmdl = new VmdlBuilder { MeshFile = exported.FirstPersonMeshFile };
+            fpVmdl.MaterialRemaps.AddRange( exported.FirstPersonMaterialRemaps );
+            var fpSequences = new Dictionary<AnimationRole, string>();
+            foreach ( var clip in exported.FirstPersonClips )
+            {
+                var roles = setup.WeaponAnimations.Where( kv => kv.Value.Clip == clip.Clip ).Select( kv => kv.Key ).ToList();
+                foreach ( var r in roles )
+                    fpSequences[r] = clip.Sequence;
+                var events = setup.Events.Where( e => roles.Contains( e.Role ) ).Select( e => (WeaponEvent.EngineName( e.Kind ), e.Time) ).ToList();
+                fpVmdl.Animations.Add( new VmdlAnimation { Name = clip.Sequence, File = clip.File, Looping = roles.Any( AnimationRoles.Loops ), FrameCount = clip.FrameCount, Fps = clip.Fps, Events = events } );
+            }
+            foreach ( var (point, p) in new[] { ("muzzle", setup.Muzzle), ("eject", setup.Eject) } )
+                if ( p is not null && fp.Asset.Skeleton.IndexOf( p.Bone ) >= 0 )
+                    fpVmdl.Attachments.Add( new VmdlAttachment( point, EngineNames.Bone( p.Bone ), V.Of( p.Position ) * setup.Scale, V.Q( p.Rotation ) ) );
+            if ( fpSequences.ContainsKey( AnimationRole.Idle ) )
+            {
+                var fpClips = fpSequences.Select( kv => new Core.Graph.GraphClip( kv.Key, kv.Value, AnimationRoles.Loops( kv.Key ), ActionTiming.Seconds( setup, session.Analysis?.Asset, kv.Key ) ) ).ToList();
+                var fpGraph = $"{folder}/{fpName}.vanmgrph";
+                var camera = fp.CameraBone.Length > 0 ? EngineNames.Bone( fp.CameraBone ) : null;
+                AssetCompiler.WriteText( fpGraph, Core.Graph.WeaponGraphGenerator.Generate( fpName, fpClips, camera, out _, fpModelPath ) );
+                result.Files.Add( fpGraph );
+                fpVmdl.AnimGraph = fpGraph;
+            }
+            AssetCompiler.WriteText( fpModelPath, fpVmdl.Build() );
+            result.Files.Add( fpModelPath );
+            result.FirstPersonModelPath = fpModelPath;
+            result.Notes.Add( fp.CameraBone.Length > 0
+                ? $"First-person viewmodel: {fpName} (camera bone {fp.CameraBone})."
+                : $"First-person viewmodel: {fpName} (no camera bone in the file: placed behind the grip; adjust Offset on Weapon Viewmodel)." );
+        }
+
         // 3a. Corrected third-person animations (new clips; the character's own stay untouched).
         if ( setup.BakeCorrectedAnimations && session.Analysis is not null )
         {
@@ -161,7 +199,7 @@ public static partial class WeaponBaker
         AssetCompiler.WriteText( profilePath, BuildProfile( session, sequenceByRole ) );
         result.Files.Add( profilePath );
         result.ProfilePath = profilePath;
-        AssetCompiler.WriteText( prefabPath, BuildPrefab( session, modelPath, prefabPath, sequenceByRole, profilePath ) );
+        AssetCompiler.WriteText( prefabPath, BuildPrefab( session, modelPath, prefabPath, sequenceByRole, profilePath, result.FirstPersonModelPath, exported.FirstPerson ) );
         result.Files.Add( prefabPath );
 
         // 4. Setup (so reimports and templates keep every choice).
@@ -197,6 +235,23 @@ public static partial class WeaponBaker
                 result.Errors[result.CorrectedModelPath] = new[] { "the corrected animations could not be loaded" };
             else
                 result.Notes.Add( $"Corrected animations: {string.Join( ", ", corrected.AnimationNames.Where( setup.CorrectedClips.Values.Contains ) )}" );
+        }
+
+        if ( result.FirstPersonModelPath.Length > 0 )
+        {
+            var fpGraph = result.FirstPersonModelPath[..^".vmdl".Length] + ".vanmgrph";
+            if ( result.Files.Contains( fpGraph ) )
+            {
+                var g = await AssetCompiler.CompileAsync( fpGraph, 60f, cancel );
+                if ( !g.Success )
+                    result.Errors[fpGraph] = g.Errors;
+            }
+            var fpCompile = await AssetCompiler.CompileAsync( result.FirstPersonModelPath, 240f, cancel );
+            var fpSequences = exported.FirstPersonClips.Select( c => c.Sequence ).Distinct().ToList();
+            if ( !fpCompile.Success )
+                result.Errors[result.FirstPersonModelPath] = fpCompile.Errors;
+            else if ( await AssetCompiler.LoadModelAsync( result.FirstPersonModelPath, fpSequences ) is not { IsError: false } fpModel || !fpSequences.All( fpModel.AnimationNames.Contains ) )
+                result.Errors[result.FirstPersonModelPath] = new[] { "the compiled first-person model is missing animations" };
         }
 
         IReadOnlyCollection<string> compiledSequences = null;
@@ -312,7 +367,7 @@ public static partial class WeaponBaker
         return profile.ToJsonString( new JsonSerializerOptions { WriteIndented = true } );
     }
 
-    private static string BuildPrefab( ImportSession session, string modelPath, string prefabPath, Dictionary<AnimationRole, string> sequenceByRole, string profilePath )
+    private static string BuildPrefab( ImportSession session, string modelPath, string prefabPath, Dictionary<AnimationRole, string> sequenceByRole, string profilePath, string firstPersonModel = "", FirstPersonRig firstPerson = null )
     {
         var setup = session.Setup;
         var values = HoldValues( session, sequenceByRole ).ToDictionary( kv => kv.Key, kv => kv.Value );
@@ -321,6 +376,25 @@ public static partial class WeaponBaker
         var root = new PrefabObject { Name = setup.Name, Tags = "weapon" };
         root.Components.Add( PrefabBuilder.ModelRenderer( modelPath ) );
         root.Components.Add( hold );
+        if ( !string.IsNullOrEmpty( firstPersonModel ) && firstPerson is not null )
+        {
+            // The first-person view: shown only to the player holding the weapon, in sync with the hold.
+            string Q( System.Numerics.Quaternion q ) => string.Join( ",", new[] { q.X, q.Y, q.Z, q.W }.Select( v => v.ToString( "0.######", System.Globalization.CultureInfo.InvariantCulture ) ) );
+            string P( System.Numerics.Vector3 v ) => string.Join( ",", new[] { v.X, v.Y, v.Z }.Select( f => f.ToString( "0.####", System.Globalization.CultureInfo.InvariantCulture ) ) );
+            var viewmodel = new PrefabObject { Name = "viewmodel", Tags = "viewmodel" };
+            viewmodel.Components.Add( PrefabBuilder.ModelRenderer( firstPersonModel ) );
+            viewmodel.Components.Add( new PrefabComponent( "WeaponImporter.WeaponViewmodel", new Dictionary<string, JsonNode>
+            {
+                ["__enabled"] = true,
+                ["FirstPerson"] = true,
+                ["HideWorldWeapon"] = true,
+                ["CameraBone"] = firstPerson.CameraBone.Length > 0 ? EngineNames.Bone( firstPerson.CameraBone ) : "",
+                ["CameraAxes"] = Q( firstPerson.CameraAxes ),
+                ["EyeInModel"] = new JsonObject { ["Position"] = P( firstPerson.Eye.Pos ), ["Rotation"] = Q( firstPerson.Eye.Rot ), ["Scale"] = "1,1,1" },
+                ["Offset"] = new JsonObject { ["Position"] = "0,0,0", ["Rotation"] = "0,0,0,1", ["Scale"] = "1,1,1" },
+            } ) );
+            root.Children.Add( viewmodel );
+        }
         return PrefabBuilder.Build( prefabPath, root );
     }
 
@@ -436,6 +510,12 @@ public sealed class ExportedWeapon
     public List<(string From, string To)> MaterialRemaps { get; } = new();
     public List<ExportedClip> Clips { get; } = new();
     public List<string> Notes { get; } = new();
+
+    /// <summary>First-person viewmodel (null when not exported).</summary>
+    public FirstPersonRig FirstPerson { get; set; }
+    public string FirstPersonMeshFile { get; set; } = "";
+    public List<(string From, string To)> FirstPersonMaterialRemaps { get; } = new();
+    public List<ExportedClip> FirstPersonClips { get; } = new();
 }
 
 public sealed record ExportedClip( string Clip, string Sequence, string File, int FrameCount, float Fps );

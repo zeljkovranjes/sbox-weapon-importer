@@ -65,6 +65,12 @@ public sealed class CheckStep : StepPanel
 		var card = AddCard( "inventory_2", "Bake", out _, "Write the model, animations, attachments and a ready prefab" );
 		card.Layout.Add( UiStyle.Muted( new Label( $"Output: {session.OutputFolder}/", card ) { WordWrap = true, ToolTip = "Files are written here inside the project's assets" }, small: true ) );
 		var s = session.Setup;
+		if ( session.Analysis?.ArmBones.Count > 0 )
+		{
+			var fp = card.Layout.Add( new Checkbox( "Bake the first-person viewmodel", card ) { Value = s.ExportFirstPerson } );
+			fp.ToolTip = "Also write <name>_fp.vmdl: this file's own arms, weapon and camera with every animation as authored. The prefab shows it to the player holding the weapon, in sync with the third-person hold.";
+			fp.StateChanged = _ => s.ExportFirstPerson = fp.Value;
+		}
 		var corrected = card.Layout.Add( new Checkbox( "Bake corrected third-person animations", card ) { Value = s.BakeCorrectedAnimations } );
 		corrected.ToolTip = "Also record the character's actions with the hands on this weapon as new clips (<name>_corrected.vmdl). The character's own animations are never changed.";
 		corrected.StateChanged = _ => s.BakeCorrectedAnimations = corrected.Value;
