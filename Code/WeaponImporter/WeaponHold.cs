@@ -13,6 +13,8 @@ namespace WeaponImporter;
 public sealed class WeaponHold : Component
 {
     private const string IdleRole = "idle";
+    private const string FireRole = "fire";
+    private const string AimedFireRole = "adsfire";
     private const float DefaultActionSeconds = 1f;
     private const float ReachGateSeconds = 0.35f;
     private const float ReachFadeDistance = 6f;
@@ -592,8 +594,13 @@ public sealed class WeaponHold : Component
         {
             var binding = _triggers[i];
             bool value = body.GetBool( binding.Parameter );
-            if ( value && !binding.Previous && (best == null || binding.Seconds > best.Seconds) )
-                best = binding;
+            if ( value && !binding.Previous )
+            {
+                binding.Role = ChooseRole( binding );
+                binding.Seconds = _actions.TryGetValue( binding.Role, out var chosen ) && chosen.Seconds > 0f ? chosen.Seconds : DefaultActionSeconds;
+                if ( best == null || binding.Seconds > best.Seconds )
+                    best = binding;
+            }
             binding.Previous = value;
         }
 
@@ -907,16 +914,42 @@ public sealed class WeaponHold : Component
         }
     }
 
+    /// <summary>
+    /// One binding per animgraph parameter (one rising edge), remembering every action that uses
+    /// it: fire and aimed fire share b_attack, the reloads share b_reload.
+    /// </summary>
     private void AddTrigger( string role, string parameter, float seconds )
     {
         for ( int i = 0; i < _triggers.Count; i++ )
         {
-            if ( string.Equals( _triggers[i].Parameter, parameter, StringComparison.Ordinal ) )
-                return;
+            if ( !string.Equals( _triggers[i].Parameter, parameter, StringComparison.Ordinal ) )
+                continue;
+            if ( !_triggers[i].Roles.Contains( role ) )
+                _triggers[i].Roles.Add( role );
+            return;
         }
 
-        _triggers.Add( new TriggerBinding { Role = role, Parameter = parameter, Seconds = seconds } );
+        _triggers.Add( new TriggerBinding { Role = role, Parameter = parameter, Seconds = seconds, Roles = { role } } );
     }
+
+    /// <summary>
+    /// The action a rising edge starts: aimed fire while aiming (when the weapon has that clip),
+    /// otherwise the plain action for the parameter (fire, reload, draw), otherwise the first one.
+    /// </summary>
+    private string ChooseRole( TriggerBinding binding )
+    {
+        if ( binding.Roles.Count == 1 )
+            return binding.Roles[0];
+        bool HasClip( string role ) => _actions.TryGetValue( role, out var a ) && !string.IsNullOrEmpty( a.Sequence );
+        if ( Aiming && binding.Roles.Contains( AimedFireRole ) && HasClip( AimedFireRole ) )
+            return AimedFireRole;
+        foreach ( var plain in PlainRoles )
+            if ( binding.Roles.Contains( plain ) )
+                return plain;
+        return binding.Roles.FirstOrDefault( r => r != AimedFireRole ) ?? binding.Roles[0];
+    }
+
+    private static readonly string[] PlainRoles = { FireRole, "reload", "draw" };
 
     private bool ParseTransformProperty( string value, string property, out Transform t )
     {
@@ -1008,6 +1041,7 @@ public sealed class WeaponHold : Component
     private sealed class TriggerBinding
     {
         public string Role;
+        public readonly List<string> Roles = new();
         public string Parameter;
         public float Seconds;
         public bool Previous;
