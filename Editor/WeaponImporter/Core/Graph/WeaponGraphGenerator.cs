@@ -288,14 +288,23 @@ public static class WeaponGraphGenerator
 
         if (Has(Slot.Fire) && pAttack != 0)
         {
+            // Aimed without an aimed-fire clip: a hip-fire clip would drop the sights, so shots
+            // keep the aimed pose (the viewmodel adds its own kick). Hip fire only when not aimed.
+            var hipOnly = adsIdle is not null && !Has(Slot.FireAds);
             var fire = State("Fire", Node(Slot.Fire));
             if (Has(Slot.FireLast) && pEmpty != 0)
             {
                 var last = State("Fire Last", Node(Slot.FireLast));
-                sm.Transition(any, last, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.Bool(pEmpty, true), StateMachineBuilder.TagActive(busy, false));
+                if (hipOnly)
+                    sm.Transition(any, last, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.Bool(pEmpty, true), StateMachineBuilder.TagActive(busy, false), StateMachineBuilder.TagActive(aiming, false));
+                else
+                    sm.Transition(any, last, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.Bool(pEmpty, true), StateMachineBuilder.TagActive(busy, false));
                 sm.Transition(last, idle, Blend, false, StateMachineBuilder.Finished());
             }
-            sm.Transition(any, fire, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.TagActive(busy, false));
+            if (hipOnly)
+                sm.Transition(any, fire, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.TagActive(busy, false), StateMachineBuilder.TagActive(aiming, false));
+            else
+                sm.Transition(any, fire, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.TagActive(busy, false));
 
             // Bolt/pump actions chain after the shot when the fire clip does not cycle the action itself.
             var actionRole = Has(Slot.Pump) ? Slot.Pump : Has(Slot.Bolt) ? Slot.Bolt : (Slot?)null;

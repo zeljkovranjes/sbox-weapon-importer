@@ -40,6 +40,17 @@ public sealed class WeaponViewmodel : Component
     /// <summary>Extra offset of the view, in eye space (fine-tune the weapon's place on screen).</summary>
     [Property] public global::Transform Offset { get; set; } = global::Transform.Zero;
 
+    /// <summary>
+    /// Strength of the kick when firing while aimed with a weapon that has no aimed-fire
+    /// animation (its graph keeps the sights up; this gives each shot some feedback). 0 = none.
+    /// </summary>
+    [Property, Range( 0, 3 )] public float AimKick { get; set; } = 1f;
+
+    private const float KickBack = 0.6f;       // inches toward the eye
+    private const float KickPitch = 1.5f;      // degrees muzzle up
+    private const float KickRecover = 0.15f;   // seconds to settle
+    private float _kick;
+
     /// <summary>Camera near clip while the view shows (the arms sit closer than the default 10).</summary>
     [Property] public float NearClip { get; set; } = 1f;
 
@@ -81,6 +92,8 @@ public sealed class WeaponViewmodel : Component
         if ( UsesGraph && renderer.UseAnimGraph )
             renderer.Set( "ironsights", Hold.IsValid() && Hold.Aiming ? 1 : 0 );
         var camera = Scene.Camera;
+        if ( _kick > 0f )
+            _kick = MathF.Max( 0f, _kick - Time.Delta / KickRecover );
         _showing = FirstPerson && Hold.IsValid() && Hold.Active && !Hold.IsProxy && camera.IsValid();
         renderer.Enabled = _showing;
         SetNearClip( _showing ? camera : null );
@@ -122,6 +135,9 @@ public sealed class WeaponViewmodel : Component
             case "adsfire":
             case "fireempty":
                 renderer.Set( "b_attack", true );
+                // Aimed without an aimed-fire clip: the graph holds the sights up; kick instead.
+                if ( Hold.IsValid() && Hold.Aiming && string.IsNullOrEmpty( Hold.SequenceFor( "adsfire" ) ) )
+                    _kick = MathF.Min( 1.5f, _kick + 1f );
                 break;
             case "reload":
             case "tacticalreload":
@@ -222,6 +238,12 @@ public sealed class WeaponViewmodel : Component
             eyeInModel = new global::Transform( bone.Position, bone.Rotation * CameraAxes );
         }
         var view = eye.ToWorld( Offset );
+        if ( _kick > 0f && AimKick > 0f )
+        {
+            // Eased: a sharp push that settles smoothly.
+            var k = _kick * _kick * AimKick;
+            view = view.ToWorld( new global::Transform( new Vector3( -KickBack * k, 0f, 0f ), Rotation.FromPitch( -KickPitch * k ) ) );
+        }
         // root * eyeInModel = view  =>  root = view * eyeInModel⁻¹
         renderer.WorldTransform = view.ToWorld( eyeInModel.ToLocal( global::Transform.Zero ) );
     }
