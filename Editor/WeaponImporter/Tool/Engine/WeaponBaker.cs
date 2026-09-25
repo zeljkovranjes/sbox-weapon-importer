@@ -167,9 +167,7 @@ public static partial class WeaponBaker
             AssetCompiler.WriteText( fpModelPath, fpVmdl.Build() );
             result.Files.Add( fpModelPath );
             result.FirstPersonModelPath = fpModelPath;
-            result.Notes.Add( fp.CameraBone.Length > 0
-                ? $"First-person viewmodel: {fpName} (camera bone {fp.CameraBone})."
-                : $"First-person viewmodel: {fpName} (no camera bone in the file: placed behind the grip; adjust Offset on Weapon Viewmodel)." );
+            result.Notes.Add( $"First-person viewmodel: {fpName}, seen from {fp.EyeSource} (fine-tune with Offset on Weapon Viewmodel)." );
         }
 
         // 3a. Corrected third-person animations (new clips; the character's own stay untouched).

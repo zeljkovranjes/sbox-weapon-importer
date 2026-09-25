@@ -30,6 +30,15 @@ public sealed class FirstPersonRig
     /// <summary>The eye in model space (reference pose): the camera, or a placement behind the grip.</summary>
     public XForm Eye { get; init; } = XForm.Identity;
 
+    /// <summary>Where the eye came from ("camera bone X", "the character's eyes", "behind the weapon").</summary>
+    public string EyeSource { get; init; } = "";
+
+    /// <summary>Largest height of the view over the weapon's bore for rigs without a camera (inches).</summary>
+    public const float ViewAboveBore = 3.5f;
+
+    /// <summary>Smallest offset of the view to the left of the bore (the weapon sits right of center).</summary>
+    public const float ViewLeftOfBore = 4f;
+
     /// <summary>Null when the file has no first-person arms (the weapon alone makes no viewmodel).</summary>
     public static FirstPersonRig? Build(WeaponAnalysis a, IEnumerable<string>? keepNames = null)
     {
@@ -99,7 +108,7 @@ public sealed class FirstPersonRig
             Attachments = source.Attachments,
         };
 
-        var (axes, eye) = EyeOf(a, camera);
+        var (axes, eye, eyeSource) = EyeOf(a, camera);
         return new FirstPersonRig
         {
             Asset = asset,
@@ -107,6 +116,7 @@ public sealed class FirstPersonRig
             CameraBone = camera >= 0 ? skeleton[camera].Name : "",
             CameraAxes = axes,
             Eye = eye,
+            EyeSource = eyeSource,
         };
     }
 
@@ -115,14 +125,24 @@ public sealed class FirstPersonRig
     /// axes: forward is the bone axis pointing most at the weapon, up the one closest to world up.
     /// Without a camera the eye sits behind, above and left of the grip, like a usual viewmodel.
     /// </summary>
-    private static (Quaternion Axes, XForm Eye) EyeOf(WeaponAnalysis a, int camera)
+    private static (Quaternion Axes, XForm Eye, string Source) EyeOf(WeaponAnalysis a, int camera)
     {
         var world = GripExtractor.ReferenceWorld(a);
         var center = a.WeaponBounds.Center;
         if (camera < 0)
         {
-            var grip = a.Primary?.Surface.Contact ?? center;
-            return (Quaternion.Identity, new XForm(grip + new Vector3(-14f, 5f, 6f), Quaternion.Identity));
+            // A full character: its own eyes, looking along the weapon. Otherwise behind and
+            // above the weapon's rear, offset left so the weapon sits lower right on screen.
+            if (ViewmodelParts.EyePoint(a.Asset.Skeleton, world) is { } eyes)
+            {
+                // A character holds a weapon at chest height, well below its eyes; a viewmodel
+                // sits close under the eye line and a little right: keep the eye at most
+                // ViewAboveBore over the bore and at least ViewLeftOfBore to its left.
+                var framed = new Vector3(eyes.X, MathF.Max(eyes.Y, a.BoreStart.Y + ViewLeftOfBore), MathF.Min(eyes.Z, a.BoreStart.Z + ViewAboveBore));
+                return (Quaternion.Identity, new XForm(framed, Quaternion.Identity), "the character's eyes, framed like a viewmodel");
+            }
+            var rear = new Vector3(a.WeaponBounds.Min.X, a.BoreStart.Y, a.BoreStart.Z);
+            return (Quaternion.Identity, new XForm(rear + new Vector3(-6f, 6f, 5f), Quaternion.Identity), "behind the weapon");
         }
         var cam = world[camera];
         var toWeapon = center - cam.Pos;
@@ -136,6 +156,6 @@ public sealed class FirstPersonRig
         var up = candidates.Count > 0 ? candidates.OrderByDescending(v => v.Z).First() : Vector3.UnitZ;
         var view = MathQ.FromAxes(forward, Vector3.Cross(up, forward));
         var fix = MathQ.Normalize(Quaternion.Conjugate(cam.Rot) * view);
-        return (fix, new XForm(cam.Pos, view));
+        return (fix, new XForm(cam.Pos, view), $"camera bone {a.Asset.Skeleton[camera].Name}");
     }
 }

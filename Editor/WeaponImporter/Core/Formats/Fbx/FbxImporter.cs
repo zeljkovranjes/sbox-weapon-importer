@@ -146,6 +146,18 @@ public static class FbxImporter
             }
         }
 
+        // Cameras in a rigged file are its first-person view (often a static scene camera at eye
+        // height, sometimes animated): keep them as bones so the viewmodel sees what the author saw.
+        if (kept.Count > 0)
+            foreach (var model in scene.Models)
+            {
+                if (model.SubClass != "Camera")
+                    continue;
+                for (var m = model; m is not null && kept.Add(m.Id); m = m.ModelParent)
+                {
+                }
+            }
+
         if (kept.Count == 0)
         {
             // No limbs: keep animated non-Mesh models and their ancestors.

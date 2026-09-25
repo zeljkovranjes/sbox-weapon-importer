@@ -40,26 +40,75 @@ public sealed class WeaponViewmodel : Component
     /// <summary>Extra offset of the view, in eye space (fine-tune the weapon's place on screen).</summary>
     [Property] public global::Transform Offset { get; set; } = global::Transform.Zero;
 
-    private string _sequence = "";
+    /// <summary>Camera near clip while the view shows (the arms sit closer than the default 10).</summary>
+    [Property] public float NearClip { get; set; } = 1f;
 
-    protected override void OnPreRender()
+    private string _sequence = "";
+    private bool _detached;
+    private bool _showing;
+    private CameraComponent _nearCamera;
+    private float _savedNear;
+
+    // Visibility is decided every update (not only when a frame is drawn), the pose and place
+    // right before rendering, from the camera's final transform.
+    protected override void OnUpdate()
     {
         if ( !Renderer.IsValid() )
             Renderer = Components.Get<SkinnedModelRenderer>( FindMode.EverythingInSelf );
-        if ( !Hold.IsValid() )
+        if ( !Hold.IsValid() && !_detached )
             Hold = Components.GetInAncestorsOrSelf<WeaponHold>();
+        // The view is placed in world space every frame, so it doesn't need its parents. Player
+        // controllers hide the body (and everything under it) from the owner's camera in first
+        // person, so it leaves the body's hierarchy and follows its weapon from the scene root.
+        if ( !_detached && Hold.IsValid() )
+        {
+            _detached = true;
+            GameObject.SetParent( null, true );
+        }
+        if ( _detached && !Hold.IsValid() )
+        {
+            GameObject.Destroy();
+            return;
+        }
         var renderer = Renderer;
         if ( !renderer.IsValid() )
             return;
         var camera = Scene.Camera;
-        var show = FirstPerson && !IsProxy && camera.IsValid();
-        renderer.Enabled = show;
+        _showing = FirstPerson && Hold.IsValid() && Hold.Active && !Hold.IsProxy && camera.IsValid();
+        renderer.Enabled = _showing;
+        SetNearClip( _showing ? camera : null );
         if ( HideWorldWeapon && Hold.IsValid() && Hold.WeaponRenderer is { } world && world.IsValid() && world != renderer )
-            world.RenderType = show ? ModelRenderer.ShadowRenderType.ShadowsOnly : ModelRenderer.ShadowRenderType.On;
-        if ( !show )
-            return;
+            world.RenderType = _showing ? ModelRenderer.ShadowRenderType.ShadowsOnly : ModelRenderer.ShadowRenderType.On;
+    }
 
-        UpdateView( camera.WorldTransform );
+    protected override void OnPreRender()
+    {
+        if ( _showing && Scene.Camera.IsValid() )
+            UpdateView( Scene.Camera.WorldTransform );
+    }
+
+    /// <summary>Lowers the camera's near clip while the view shows, and restores it afterwards.</summary>
+    private void SetNearClip( CameraComponent camera )
+    {
+        if ( _nearCamera.IsValid() && _nearCamera != camera )
+        {
+            _nearCamera.ZNear = _savedNear;
+            _nearCamera = null;
+        }
+        if ( camera.IsValid() && _nearCamera != camera )
+        {
+            _nearCamera = camera;
+            _savedNear = camera.ZNear;
+        }
+        if ( _nearCamera.IsValid() )
+            _nearCamera.ZNear = MathF.Min( _savedNear, NearClip );
+    }
+
+    protected override void OnDisabled()
+    {
+        SetNearClip( null );
+        if ( Hold.IsValid() && Hold.WeaponRenderer is { } world && world.IsValid() )
+            world.RenderType = ModelRenderer.ShadowRenderType.On;
     }
 
     /// <summary>Poses and places the view for an eye (the player's camera); called every frame it shows.</summary>

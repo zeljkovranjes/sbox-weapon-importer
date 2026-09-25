@@ -119,13 +119,7 @@ public sealed partial class WeaponViewport
 		_fpInverseRest = new XForm[skeleton.Count];
 		for ( var i = 0; i < skeleton.Count; i++ )
 			_fpInverseRest[i] = skeleton.RestWorld[i].Inverse();
-		_fpCameraBone = -1;
-		for ( var i = 0; i < skeleton.Count; i++ )
-			if ( skeleton[i].Name.Contains( "camera", StringComparison.OrdinalIgnoreCase ) )
-			{
-				_fpCameraBone = i;
-				break;
-			}
+		_fpCameraBone = WeaponImporter.Core.Rig.ViewmodelParts.CameraBone( skeleton );
 		_fpFrame = -1;
 		_fpClip = null;
 		_fpWorld = null;

@@ -52,13 +52,66 @@ public static class ViewmodelParts
         return false;
     }
 
-    /// <summary>The rig's camera bone (first bone named like a camera), or -1.</summary>
+    /// <summary>
+    /// The rig's camera bone ("Camera", "Head_Cam", "cam_01"...: a "camera" or whole-word "cam"
+    /// in its name, end bones skipped), or -1.
+    /// </summary>
     public static int CameraBone(Skeleton skeleton)
     {
+        var fallback = -1;
         for (var i = 0; i < skeleton.Count; i++)
-            if (skeleton[i].Name.Contains("camera", StringComparison.OrdinalIgnoreCase))
+        {
+            var name = skeleton[i].Name;
+            if (name.EndsWith("_end", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (name.Contains("camera", StringComparison.OrdinalIgnoreCase))
                 return i;
-        return -1;
+            if (fallback < 0 && WordsOf(name).Contains("cam"))
+                fallback = i;
+        }
+        return fallback;
+    }
+
+    /// <summary>
+    /// The character's eyes in a full-body file (midpoint of its eye bones, else its head bone),
+    /// or null. A first-person view of such a file is what the character itself sees.
+    /// </summary>
+    public static Vector3? EyePoint(Skeleton skeleton, IReadOnlyList<Maths.XForm> world)
+    {
+        var eyes = new List<Vector3>();
+        var head = -1;
+        for (var i = 0; i < skeleton.Count; i++)
+        {
+            var name = skeleton[i].Name;
+            if (name.EndsWith("_end", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var words = WordsOf(name);
+            if (words.Contains("eye") && !words.Contains("lid") && !words.Contains("brow"))
+                eyes.Add(world[i].Pos);
+            else if (head < 0 && words.Contains("head") && !words.Contains("cam"))
+                head = i;
+        }
+        // Rigs also carry eye aim targets out in front of the face: only eyes near the head count.
+        if (head >= 0)
+            eyes = eyes.Where(e => Vector3.Distance(e, world[head].Pos) < 8f).ToList();
+        if (eyes.Count >= 2)
+            return eyes.Aggregate(Vector3.Zero, (a, b) => a + b) / eyes.Count;
+        return head >= 0 ? world[head].Pos : null;
+    }
+
+    private static readonly HashSet<string> TorsoTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "spine", "neck", "head", "pelvis", "hip", "hips", "chest", "torso", "belly", "face", "jaw",
+    };
+
+    /// <summary>A bone of a character's torso or head (not arms or hands).</summary>
+    private static bool IsTorsoOrHead(Skeleton skeleton, int bone)
+        => bone >= 0 && bone < skeleton.Count && WordsOf(skeleton[bone].Name).Any(TorsoTokens.Contains);
+
+    private static List<string> WordsOf(string name)
+    {
+        var leaf = name[(name.LastIndexOfAny(new[] { ':', '|', '/' }) + 1)..];
+        return Words.Matches(leaf).Select(m => m.Value.ToLowerInvariant()).ToList();
     }
 
     /// <summary>
@@ -82,9 +135,9 @@ public static class ViewmodelParts
                 byBone[bone] = list = new List<int>();
             list.Add(t);
         }
-        // Without a rig camera the file is a full character: keep the viewmodel part (weapon,
-        // forearms and hands) so the body doesn't block the view.
-        if (CameraBone(skeleton) < 0 && byBone.Keys.Any(b => !IsBodyBone(skeleton, b)))
+        // A full character (geometry on its torso or head): keep the viewmodel part (weapon,
+        // forearms and hands) so the body doesn't block the view. Arms-only rigs keep everything.
+        if (byBone.Keys.Any(b => IsTorsoOrHead(skeleton, b)) && byBone.Keys.Any(b => !IsBodyBone(skeleton, b)))
             foreach (var body in byBone.Keys.Where(b => IsBodyBone(skeleton, b)).ToList())
                 byBone.Remove(body);
         return byBone;
