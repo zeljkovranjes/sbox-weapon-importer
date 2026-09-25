@@ -17,6 +17,7 @@ public static class WeaponParams
     public const string DeploySkip = "b_deploy_skip";
     public const string Holster = "b_holster";
     public const string Inspect = "b_inspect";
+    public const string Deploy = "b_deploy";
     public const string Sprint = "b_sprint";
     public const string MoveBob = "move_bob";
     public const string Ironsights = "ironsights";
@@ -109,6 +110,11 @@ public static class WeaponGraphGenerator
         {
             if (clip is null || string.IsNullOrEmpty(clip.Sequence) || SlotFor(clip.Role) is not { } slot)
                 continue;
+            // Locomotion (walk, sprint) stays out of the weapon graph, as in Facepunch's own
+            // first-person weapon graphs: sway and bob belong to the game's code. The clips are
+            // still in the model for games that want to play them.
+            if (clip.Role is AnimationRole.Walk or AnimationRole.Sprint)
+                continue;
             bySlot.TryAdd(slot, clip);
         }
 
@@ -183,6 +189,9 @@ public static class WeaponGraphGenerator
             deploy = State("Deploy", Node(Slot.Deploy, pSpeedDeploy, (discouraged, 0f, 0.9f)), start: true, busy);
             sm.Transition(deploy, idle, Blend, false, StateMachineBuilder.Finished());
             sm.Transition(deploy, idle, QuickBlend, false, StateMachineBuilder.Bool(pSkip, true));
+            // b_deploy plays the draw again (switching back to this weapon).
+            var pDeploy = graph.BoolParam(WeaponParams.Deploy, autoReset: true);
+            sm.Transition(any, deploy, 0f, true, StateMachineBuilder.Bool(pDeploy, true));
         }
 
         if (Has(Slot.Holster))

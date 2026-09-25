@@ -87,6 +87,15 @@ public sealed class WeaponSetup
     /// </summary>
     public bool ExportFirstPerson { get; set; } = true;
 
+    /// <summary>Largest texture side written by the bake (bigger images are scaled down); 0 keeps them as they are.</summary>
+    public int MaxTextureSize { get; set; } = 2048;
+
+    /// <summary>
+    /// Fingerprints of the editable files the last bake wrote (graphs, prefab). A file that no
+    /// longer matches was edited by hand and is kept on the next bake.
+    /// </summary>
+    public Dictionary<string, string> GeneratedHashes { get; set; } = new();
+
     /// <summary>
     /// Third-person reloads move the support hand onto this weapon's magazine where the
     /// character's reload works its own (off by default: the hand follows the animation).

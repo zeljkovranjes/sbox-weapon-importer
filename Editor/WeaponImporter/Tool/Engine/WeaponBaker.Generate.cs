@@ -48,6 +48,15 @@ public static partial class WeaponBaker
                 }
                 result.WrittenFiles.Add( output.VmatPath );
                 result.WrittenFiles.AddRange( output.Textures.Select( t => t.RelativePath ) );
+                if ( setup.MaxTextureSize > 0 )
+                    foreach ( var texture in output.Textures )
+                    {
+                        var written = System.IO.Path.GetFullPath( System.IO.Path.Combine( assetsRoot, texture.RelativePath.Replace( '/', System.IO.Path.DirectorySeparatorChar ) ) );
+                        // Only the bake's own copies: an image already at the output path is the user's source.
+                        if ( texture.Source.FilePath is { } src && string.Equals( System.IO.Path.GetFullPath( src ), written, StringComparison.OrdinalIgnoreCase ) )
+                            continue;
+                        LimitSize( written, setup.MaxTextureSize, result.Notes );
+                    }
                 // ModelDoc names DMX materials after the faceSet material; point them at the generated vmat.
                 remaps.Add( ($"{dmxMaterial}.vmat", output.VmatPath) );
             }
@@ -90,6 +99,40 @@ public static partial class WeaponBaker
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Scales an exported texture down so its longest side is at most <paramref name="max"/>
+    /// (same file, same format). TGA files stay as they are (Skia can't write them).
+    /// </summary>
+    private static void LimitSize( string path, int max, List<string> notes )
+    {
+        if ( !System.IO.File.Exists( path ) )
+            return;
+        var ext = System.IO.Path.GetExtension( path ).ToLowerInvariant();
+        var format = ext switch { ".png" => SKEncodedImageFormat.Png, ".jpg" or ".jpeg" => SKEncodedImageFormat.Jpeg, _ => (SKEncodedImageFormat?)null };
+        if ( format is null )
+            return;
+        try
+        {
+            using var codec = SKCodec.Create( path );
+            if ( codec is null || Math.Max( codec.Info.Width, codec.Info.Height ) <= max )
+                return;
+            using var source = SKBitmap.Decode( codec );
+            var scale = (float)max / Math.Max( source.Width, source.Height );
+            var info = new SKImageInfo( Math.Max( 1, (int)(source.Width * scale) ), Math.Max( 1, (int)(source.Height * scale) ), source.ColorType, source.AlphaType );
+            using var resized = source.Resize( info, SKFilterQuality.High );
+            if ( resized is null )
+                return;
+            using var image = SKImage.FromBitmap( resized );
+            using var data = image.Encode( format.Value, 95 );
+            codec.Dispose();
+            System.IO.File.WriteAllBytes( path, data.ToArray() );
+        }
+        catch ( Exception e ) when ( e is System.IO.IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException )
+        {
+            notes.Add( $"{System.IO.Path.GetFileName( path )} kept at full size ({e.Message})." );
+        }
     }
 
     /// <summary>Writes one channel of an image as a greyscale PNG (packed glTF roughness/metalness maps).</summary>

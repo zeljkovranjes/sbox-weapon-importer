@@ -71,6 +71,13 @@ public sealed class CheckStep : StepPanel
 			fp.ToolTip = "Also write <name>_fp.vmdl: this file's own arms, weapon and camera with every animation as authored. The prefab shows it to the player holding the weapon, in sync with the third-person hold.";
 			fp.StateChanged = _ => s.ExportFirstPerson = fp.Value;
 		}
+		var sizeRow = UiStyle.FieldRow( card, card.Layout, "Textures", "Largest texture size in the baked weapon; bigger images are scaled down (smaller files, same look at normal distances)" );
+		var size = sizeRow.Add( UiStyle.Framed( new ComboBox( card ) ), 1 );
+		foreach ( var (label, value) in new[] { ("Original size", 0), ("4096", 4096), ("2048", 2048), ("1024", 1024) } )
+		{
+			var v = value;
+			size.AddItem( label, "photo_size_select_large", () => s.MaxTextureSize = v, selected: s.MaxTextureSize == value );
+		}
 		var corrected = card.Layout.Add( new Checkbox( "Bake corrected third-person animations", card ) { Value = s.BakeCorrectedAnimations } );
 		corrected.ToolTip = "Also record the character's actions with the hands on this weapon as new clips (<name>_corrected.vmdl). The character's own animations are never changed.";
 		corrected.StateChanged = _ => s.BakeCorrectedAnimations = corrected.Value;

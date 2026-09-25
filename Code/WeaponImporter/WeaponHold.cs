@@ -128,6 +128,12 @@ public sealed class WeaponHold : Component
     /// </summary>
     [Property] public int ShellsToLoad { get; set; } = 4;
 
+    /// <summary>
+    /// The weapon is empty (set it from your ammo): reloads play the empty reload and the last
+    /// shot plays the last-round fire, when the weapon has those animations (the animgraph's b_empty).
+    /// </summary>
+    [Property] public bool Empty { get; set; }
+
     /// <summary>A shell-by-shell reload is running.</summary>
     public bool ShellReloading => _shellReload;
 
@@ -238,6 +244,8 @@ public sealed class WeaponHold : Component
         _paused = false;
         _started = true;
         role = NormalizeRole( role );
+        if ( role == "reload" && Empty && HasClip( "emptyreload" ) )
+            role = "emptyreload";
         // A reload on a weapon with a shell-by-shell reload runs it (start, shells, end).
         if ( role is "reload" or "tacticalreload" or "emptyreload" && HasClip( InsertRole ) && !HasClip( role ) )
         {
@@ -1044,6 +1052,11 @@ public sealed class WeaponHold : Component
         // Shell-by-shell reload when the weapon has an insert clip (and shells to load).
         if ( binding.Roles.Contains( InsertRole ) && HasClip( InsertRole ) )
             return ShellsToLoad <= 0 ? "" : HasClip( ReloadStartRole ) ? ReloadStartRole : InsertRole;
+        // Empty: the empty reload / last-round fire when the weapon has them.
+        if ( Empty && binding.Roles.Contains( "emptyreload" ) && HasClip( "emptyreload" ) )
+            return "emptyreload";
+        if ( Empty && binding.Roles.Contains( "fireempty" ) && HasClip( "fireempty" ) )
+            return "fireempty";
         if ( binding.Roles.Count == 1 )
             return binding.Roles[0];
         if ( Aiming && binding.Roles.Contains( AimedFireRole ) && HasClip( AimedFireRole ) )

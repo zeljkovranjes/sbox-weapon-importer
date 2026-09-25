@@ -75,6 +75,14 @@ public sealed class WeaponViewmodel : Component
         // The view is placed in world space every frame, so it doesn't need its parents. Player
         // controllers hide the body (and everything under it) from the owner's camera in first
         // person, so it leaves the body's hierarchy and follows its weapon from the scene root.
+        // Other players' copies (proxies) never show the view: leave them untouched and hidden.
+        if ( Hold.IsValid() && Hold.IsProxy )
+        {
+            if ( Renderer.IsValid() )
+                Renderer.Enabled = false;
+            _showing = false;
+            return;
+        }
         if ( !_detached && Hold.IsValid() )
         {
             _detached = true;
@@ -90,8 +98,11 @@ public sealed class WeaponViewmodel : Component
             return;
         Listen( Hold );
         DriveShellReload( renderer );
-        if ( UsesGraph && renderer.UseAnimGraph )
-            renderer.Set( "ironsights", Hold.IsValid() && Hold.Aiming ? 1 : 0 );
+        if ( UsesGraph && renderer.UseAnimGraph && Hold.IsValid() )
+        {
+            renderer.Set( "ironsights", Hold.Aiming ? 1 : 0 );
+            renderer.Set( "b_empty", Hold.Empty );
+        }
         var camera = Scene.Camera;
         if ( _kick > 0f )
             _kick = MathF.Max( 0f, _kick - Time.Delta / KickRecover );
@@ -143,7 +154,7 @@ public sealed class WeaponViewmodel : Component
             case "reload":
             case "tacticalreload":
             case "emptyreload":
-                renderer.Set( "b_empty", role == "emptyreload" );
+                renderer.Set( "b_empty", role == "emptyreload" || Hold.IsValid() && Hold.Empty );
                 renderer.Set( "b_reload", true );
                 break;
             case "reloadstart":
@@ -159,6 +170,7 @@ public sealed class WeaponViewmodel : Component
                 break;
             case "draw":
                 renderer.Set( "b_holster", false );
+                renderer.Set( "b_deploy", true );
                 break;
         }
     }

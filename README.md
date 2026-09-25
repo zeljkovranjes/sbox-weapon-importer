@@ -29,6 +29,17 @@ Everything goes to `Assets/weapons/<name>/`. Put `<name>.prefab` under your play
 Clips are recognised by name (idle, fire, reload, draw, aim in/out...). Anything that isn't can be
 assigned on the **Animations** page: click a row and search for the clip.
 
+## From your game code
+
+Actions come from the character's animgraph (`b_attack`, `b_reload`, `b_deploy`) or
+`WeaponHold.Play( "reload" )`. On **Weapon Hold**, set:
+
+- `Aiming` while the player aims down the sights
+- `Empty` when the magazine is empty (plays the empty reload / last-round fire if the weapon has them)
+- `ShellsToLoad` before a shell-by-shell reload; `ShellInserted` fires for each shell
+
+Edited animgraphs and prefabs are kept when you bake again; delete one to have it regenerated.
+
 ## Requirements
 
 Third-person animations need the

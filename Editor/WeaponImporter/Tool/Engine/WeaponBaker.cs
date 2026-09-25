@@ -127,7 +127,7 @@ public static partial class WeaponBaker
         {
             var graphClips = sequenceByRole.Select( kv => new Core.Graph.GraphClip( kv.Key, kv.Value, AnimationRoles.Loops( kv.Key ), ActionTiming.Seconds( setup, session.Analysis?.Asset, kv.Key ) ) ).ToList();
             var graphPath = $"{folder}/{name}.vanmgrph";
-            AssetCompiler.WriteText( graphPath, Core.Graph.WeaponGraphGenerator.Generate( name, graphClips, null, out _, modelPath ) );
+            WriteEditable( result, setup, graphPath, Core.Graph.WeaponGraphGenerator.Generate( name, graphClips, null, out _, modelPath ) );
             result.Files.Add( graphPath );
             result.GraphPath = graphPath;
             vmdl.AnimGraph = graphPath;
@@ -160,7 +160,7 @@ public static partial class WeaponBaker
                 var fpClips = fpSequences.Select( kv => new Core.Graph.GraphClip( kv.Key, kv.Value, AnimationRoles.Loops( kv.Key ), ActionTiming.Seconds( setup, session.Analysis?.Asset, kv.Key ) ) ).ToList();
                 var fpGraph = $"{folder}/{fpName}.vanmgrph";
                 var camera = fp.CameraBone.Length > 0 ? EngineNames.Bone( fp.CameraBone ) : null;
-                AssetCompiler.WriteText( fpGraph, Core.Graph.WeaponGraphGenerator.Generate( fpName, fpClips, camera, out _, fpModelPath ) );
+                WriteEditable( result, setup, fpGraph, Core.Graph.WeaponGraphGenerator.Generate( fpName, fpClips, camera, out _, fpModelPath ) );
                 result.Files.Add( fpGraph );
                 fpVmdl.AnimGraph = fpGraph;
             }
@@ -197,7 +197,7 @@ public static partial class WeaponBaker
         AssetCompiler.WriteText( profilePath, BuildProfile( session, sequenceByRole ) );
         result.Files.Add( profilePath );
         result.ProfilePath = profilePath;
-        AssetCompiler.WriteText( prefabPath, BuildPrefab( session, modelPath, prefabPath, sequenceByRole, profilePath, result.FirstPersonModelPath, exported.FirstPerson ) );
+        WriteEditable( result, setup, prefabPath, BuildPrefab( session, modelPath, prefabPath, sequenceByRole, profilePath, result.FirstPersonModelPath, exported.FirstPerson ) );
         result.Files.Add( prefabPath );
 
         // 4. Setup (so reimports and templates keep every choice).
@@ -267,6 +267,27 @@ public static partial class WeaponBaker
         progress?.Report( result.Success ? "Baked" : "Bake finished with errors" );
         return result;
     }
+
+    /// <summary>
+    /// Writes a file users may open and edit (animgraphs, the prefab). When the copy on disk no
+    /// longer matches what the last bake wrote, it was edited by hand: it is kept and noted
+    /// (delete it to have it generated again).
+    /// </summary>
+    private static void WriteEditable( BakeResult result, WeaponSetup setup, string relative, string text )
+    {
+        setup.GeneratedHashes ??= new Dictionary<string, string>();
+        var abs = AssetCompiler.Absolute( relative );
+        if ( System.IO.File.Exists( abs ) && setup.GeneratedHashes.TryGetValue( relative, out var written ) && Fingerprint( System.IO.File.ReadAllText( abs ) ) != written )
+        {
+            result.Notes.Add( $"Kept your edited {relative} (delete it to have it generated again)." );
+            return;
+        }
+        AssetCompiler.WriteText( relative, text );
+        setup.GeneratedHashes[relative] = Fingerprint( text );
+    }
+
+    private static string Fingerprint( string text )
+        => Convert.ToHexString( System.Security.Cryptography.SHA256.HashData( System.Text.Encoding.UTF8.GetBytes( text.Replace( "\r\n", "\n" ) ) ), 0, 12 );
 
     /// <summary>Absolute path of the imported file (source of a compiled model), or null.</summary>
     private static string SourceAbsolute( string path )
