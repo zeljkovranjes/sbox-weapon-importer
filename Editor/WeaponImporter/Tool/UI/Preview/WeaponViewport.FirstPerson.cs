@@ -245,8 +245,10 @@ public sealed partial class WeaponViewport
 		}
 		else if ( _fpRigEye is { } rigEye )
 		{
+			// Upright the way the eye is (the weapon may be turned on its side in model space).
 			eye = rigEye.Position;
 			look = eye + rigEye.Rotation.Forward * 10f;
+			up = rigEye.Rotation.Up;
 		}
 		else
 		{

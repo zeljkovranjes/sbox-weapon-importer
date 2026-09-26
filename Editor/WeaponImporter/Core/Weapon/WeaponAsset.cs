@@ -15,6 +15,12 @@ public enum SourceKind { Fbx, Gltf, Vmdl, Synthetic }
 public sealed record SourceAttachment(string Name, string Bone, XForm Local);
 
 /// <summary>
+/// A camera in the file: the local axes it looks along and holds up, and its vertical field
+/// of view in degrees (0 when the file doesn't say).
+/// </summary>
+public readonly record struct SourceCamera(Vector3 Forward, Vector3 Up, float FieldOfView = 0f);
+
+/// <summary>
 /// Everything the importer knows about a weapon, in s&amp;box model space (inches, Z up,
 /// +X forward). The editor fills it from a compiled model; tests build it from FBX/glTF
 /// or synthetic meshes.
@@ -40,7 +46,7 @@ public sealed class WeaponAsset
     /// Camera objects of the file kept as bones, with the local axes they look along and hold
     /// up (FBX cameras look down their +X, up +Y, carried through the axis conversion).
     /// </summary>
-    public IReadOnlyDictionary<string, (Vector3 Forward, Vector3 Up)> CameraViews { get; init; } = new Dictionary<string, (Vector3 Forward, Vector3 Up)>();
+    public IReadOnlyDictionary<string, SourceCamera> CameraViews { get; init; } = new Dictionary<string, SourceCamera>();
 
     /// <summary>Import notes (unit fixes, skipped meshes...).</summary>
     public List<string> Notes { get; } = new();

@@ -137,6 +137,22 @@ public sealed class HandRig
         var upperArm = skeleton[lowerArm].ParentIndex;
         while (upperArm >= 0 && IsHelper(skeleton[upperArm].Name))
             upperArm = skeleton[upperArm].ParentIndex;
+        // Rigs whose hands hang off a detached IK forearm (parented to the root) keep the real
+        // arm chain elsewhere: the shoulder is then the side's named upper arm.
+        if (upperArm < 0 || skeleton[upperArm].ParentIndex < 0)
+        {
+            var named = Find($"{full}Arm", $"mixamorig:{full}Arm", $"upperarm_{lower}", $"UpperArm_{s}", $"arm_upper_{s}", $"upper_arm.{s}", $"DEF-upper_arm.{s}", $"Bip01 {s} UpperArm");
+            if (named < 0)
+                for (var b = 0; b < skeleton.Count && named < 0; b++)
+                {
+                    var bare = skeleton[b].Name;
+                    var colon = bare.LastIndexOf(':');
+                    if (colon >= 0 && string.Equals(bare[(colon + 1)..], $"{full}Arm", StringComparison.OrdinalIgnoreCase))
+                        named = b;
+                }
+            if (named >= 0)
+                upperArm = named;
+        }
         if (upperArm < 0)
             return null;
         var clavicle = skeleton[upperArm].ParentIndex;

@@ -294,7 +294,7 @@ public static class FbxWeaponReader
                 normalsArray, anyUVs ? cornerUVs.ToArray() : null, triMaterial.ToArray(), materials),
             Clips = clips,
             CameraViews = scene.Models.Where(m => m.SubClass == "Camera" && skeleton.IndexOf(m.Name) >= 0)
-                .GroupBy(m => m.Name).ToDictionary(g => g.Key, g => CameraView(g.First(), skeleton, conversion)),
+                .GroupBy(m => m.Name).ToDictionary(g => g.Key, g => CameraView(g.First(), skeleton, conversion) with { FieldOfView = CameraFieldOfView(tree, g.First()) }),
         };
         asset.Notes.AddRange(notes);
         asset.Notes.AddRange(materialReader.Notes.Distinct().Take(20));
@@ -305,7 +305,41 @@ public static class FbxWeaponReader
     /// The local axes a camera looks along and holds up. FBX 7 cameras look down their +X with
     /// +Y up; FBX 6 cameras aim at a LookAt point with an Up vector, in the scene's space.
     /// </summary>
-    private static (Vector3 Forward, Vector3 Up) CameraView(FbxObject camera, Skeleton skeleton, SpaceConversion conversion)
+    /// <summary>
+    /// A camera's vertical field of view in degrees, or 0 when unknown. FBX 7 keeps it on the
+    /// camera's NodeAttribute; FBX 6 (upgraded) on the camera model itself.
+    /// </summary>
+    private static float CameraFieldOfView(FbxNode tree, FbxObject camera)
+    {
+        static float? Read(FbxNode? node)
+        {
+            var props = node?.Child("Properties70");
+            if (props is null)
+                return null;
+            double? Get(string name) => props.Children.FirstOrDefault(c => c.Properties.Count > 4 && c.Properties[0] as string == name) is { } p
+                ? Convert.ToDouble(p.Properties[4], System.Globalization.CultureInfo.InvariantCulture) : null;
+            if (Get("FieldOfViewY") is { } y and > 1 and < 179)
+                return (float)y;
+            // Only the horizontal angle: turned into a vertical one by the film aspect.
+            if (Get("FieldOfView") is { } x and > 1 and < 179)
+            {
+                var aspect = Get("FilmAspectRatio") is { } r and > 0.1 ? r : 16.0 / 9.0;
+                return (float)(2 * Math.Atan(Math.Tan(x * Math.PI / 360) / aspect) * 180 / Math.PI);
+            }
+            return null;
+        }
+        if (Read(camera.Node) is { } own)
+            return own;
+        // The NodeAttribute connected to the camera model.
+        var attributeIds = tree.Child("Connections")?.Children
+            .Where(c => c.Properties.Count >= 3 && c.Properties[0] as string == "OO" && Convert.ToInt64(c.Properties[2]) == camera.Id)
+            .Select(c => Convert.ToInt64(c.Properties[1])).ToHashSet() ?? new HashSet<long>();
+        var attribute = tree.Child("Objects")?.ChildrenNamed("NodeAttribute")
+            .FirstOrDefault(n => n.Properties.Count > 0 && n.Properties[0] is long id && attributeIds.Contains(id));
+        return Read(attribute) ?? 0f;
+    }
+
+    private static SourceCamera CameraView(FbxObject camera, Skeleton skeleton, SpaceConversion conversion)
     {
         var node = camera.Node;
         if (node.Child("LookAt") is { Properties.Count: >= 3 } lookAt && node.Child("Position") is { Properties.Count: >= 3 } position)
@@ -316,11 +350,11 @@ public static class FbxWeaponReader
             if (dir.LengthSquared() > 1e-8f)
             {
                 var toLocal = Quaternion.Conjugate(skeleton.RestWorld[skeleton.IndexOf(camera.Name)].Rot);
-                return (Vector3.Normalize(Vector3.Transform(conversion.Direction(Vector3.Normalize(dir)), toLocal)),
+                return new SourceCamera(Vector3.Normalize(Vector3.Transform(conversion.Direction(Vector3.Normalize(dir)), toLocal)),
                         Vector3.Normalize(Vector3.Transform(conversion.Direction(up), toLocal)));
             }
         }
-        return (conversion.Direction(Vector3.UnitX), conversion.Direction(Vector3.UnitY));
+        return new SourceCamera(conversion.Direction(Vector3.UnitX), conversion.Direction(Vector3.UnitY));
     }
 
     /// <summary>Row-vector normal matrix: inverse transpose of the linear part (falls back to the matrix itself when singular).</summary>

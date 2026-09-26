@@ -146,14 +146,44 @@ public static class TakeSplitter
     public static string StartPoseName(string take) => $"{take} start pose";
 
     /// <summary>
-    /// A one-second still of the take's first frame: an item's use starts from the pose it is
-    /// held in, which is its idle when the file has no idle of its own.
+    /// A one-second still of the pose the take's action starts from: an item's use starts from
+    /// the pose it is held in, which is its idle when the file has no idle of its own. Takes that
+    /// open by bringing the item up (the hands start out of view) use the first settled frame.
     /// </summary>
-    public static Clip StartPose(Clip take)
+    public static Clip StartPose(Clip take, Skeleton? skeleton = null)
     {
-        var frame = take.Frames[0];
+        var frame = take.Frames[skeleton is null ? 0 : SettledFrame(skeleton, take)];
         var frames = Enumerable.Range(0, Math.Max(2, (int)MathF.Round(take.Fps))).Select(_ => frame.ToArray()).ToList();
         return new Clip(StartPoseName(take.Name), take.Fps, true, frames, take.NativeFps);
+    }
+
+    /// <summary>
+    /// The first frame the take comes to rest at: 0 when it starts still, else the first moment
+    /// in its first half where everything has slowed to a tenth of its fastest motion for a few
+    /// frames (the end of a raise into view).
+    /// </summary>
+    public static int SettledFrame(Skeleton skeleton, Clip take)
+    {
+        var n = take.FrameCount;
+        if (n < 8)
+            return 0;
+        var worlds = take.Frames.Select(f => new Pose(f).ToWorld(skeleton)).ToArray();
+        var speed = new float[n];
+        for (var i = 1; i < n; i++)
+            for (var b = 0; b < skeleton.Count; b++)
+                speed[i] = MathF.Max(speed[i], System.Numerics.Vector3.Distance(worlds[i][b].Pos, worlds[i - 1][b].Pos));
+        var peak = speed.Max();
+        if (peak <= 1e-6f)
+            return 0;
+        var still = peak * 0.1f;
+        var hold = Math.Max(3, (int)MathF.Round(take.Fps * 0.1f));
+        bool Settled(int f) => Enumerable.Range(f + 1, Math.Min(hold, n - f - 1)).All(i => speed[i] <= still);
+        if (Settled(0))
+            return 0;
+        for (var f = 1; f < n / 2; f++)
+            if (Settled(f))
+                return f;
+        return 0;
     }
 
     /// <summary>Name of a part's clip: "CINEMA_4D_Main 3".</summary>
@@ -170,7 +200,7 @@ public static class TakeSplitter
         // Every split take also offers its first frame as a still pose.
         foreach (var take in asset.Clips.Where(c => splits.ContainsKey(c.Name) && c.FrameCount > 0))
             if (names.Add(StartPoseName(take.Name)))
-                clips.Add(StartPose(take));
+                clips.Add(StartPose(take, asset.Skeleton));
         foreach (var take in asset.Clips)
         {
             if (!splits.TryGetValue(take.Name, out var parts) || parts.Count < 2)

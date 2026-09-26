@@ -131,6 +131,49 @@ public sealed class FirstPersonRig
     /// </summary>
     public static int FindCamera(WeaponAnalysis a)
     {
+        var camera = PickCamera(a);
+        return camera >= 0 && !SeesTheHands(a, camera) ? -1 : camera;
+    }
+
+    /// <summary>
+    /// Whether an authored camera shows the file's hands through its animations: over every
+    /// clip, the hands sit inside the camera's own field of view most of the time. Packs also
+    /// ship scene and render cameras (a close-up, a turntable) that frame nothing a player would
+    /// see; the arms or the file's origin decide then. Files without arms keep their camera.
+    /// </summary>
+    private static bool SeesTheHands(WeaponAnalysis a, int camera)
+    {
+        var skeleton = a.Asset.Skeleton;
+        if (!a.Asset.CameraViews.TryGetValue(skeleton[camera].Name, out var view))
+            return true;
+        var r = Hands.HandRig.Build(skeleton, Hands.Side.Right);
+        if (r is null || !a.ArmBones.Contains(r.Hand))
+            return true;
+        var l = Hands.HandRig.Build(skeleton, Hands.Side.Left);
+        var both = l is not null && a.ArmBones.Contains(l.Hand);
+        // Half the diagonal of a 16:9 frame at the camera's vertical angle (60 degrees when unknown).
+        var fovY = view.FieldOfView > 1f ? view.FieldOfView : 60f;
+        var halfDiagonal = MathF.Atan(MathF.Tan(fovY * MathF.PI / 360f) * MathF.Sqrt(1f + (16f / 9f) * (16f / 9f))) * 180f / MathF.PI;
+        var angles = new List<float>();
+        foreach (var clip in a.Asset.Clips.Where(c => !c.Name.EndsWith(" start pose", StringComparison.Ordinal)))
+            for (var f = 0; f < clip.FrameCount; f += Math.Max(1, clip.FrameCount / 12))
+            {
+                var world = new Pose(clip.Frames[f]).ToWorld(skeleton);
+                var hands = both ? (world[r.Hand].Pos + world[l!.Hand].Pos) * 0.5f : world[r.Hand].Pos;
+                var to = hands - world[camera].Pos;
+                if (to.Length() < 1e-3f)
+                    continue;
+                var look = Vector3.Normalize(Vector3.Transform(view.Forward, world[camera].Rot));
+                angles.Add(MathF.Acos(Math.Clamp(Vector3.Dot(look, Vector3.Normalize(to)), -1f, 1f)) * 180f / MathF.PI);
+            }
+        if (angles.Count == 0)
+            return true;
+        angles.Sort();
+        return angles[angles.Count / 2] < halfDiagonal;
+    }
+
+    private static int PickCamera(WeaponAnalysis a)
+    {
         var skeleton = a.Asset.Skeleton;
         var cameras = Enumerable.Range(0, skeleton.Count).Where(i => ViewmodelParts.IsCameraName(skeleton[i].Name)).ToList();
         if (cameras.Count <= 1)
@@ -185,16 +228,71 @@ public sealed class FirstPersonRig
         var shoulders = (shoulderR + shoulderL) * 0.5f;
         var reach = hands - shoulders;
 
-        var up = Vector3.UnitZ;
+        var up = ArmsUp(reach, both ? shoulderR - shoulderL : (Vector3?)null);
         var forward = reach - up * Vector3.Dot(reach, up);
         forward = forward.Length() > 1f / a.Scale ? Vector3.Normalize(forward) : -Vector3.UnitY;
         // First-person cameras sit about a foot behind the hands and a few inches above them
         // (measured on rigs that ship a camera): place the eye from the hands, level.
         var eye = hands - forward * (11f / a.Scale) + up * (5f / a.Scale);
+        var source = "the arms (the file has no camera)";
+        // Viewmodels exported for Source and most engines keep the eye at the file's origin:
+        // use it when it sits where an eye would (behind the hands, a little above, not off to a side).
+        var origin = File(a.SourceOrigin);
+        var toHands = hands - origin;
+        var behind = Vector3.Dot(toHands, forward) * a.Scale;
+        var above = -Vector3.Dot(toHands, up) * a.Scale;
+        var aside = (toHands - forward * Vector3.Dot(toHands, forward) - up * Vector3.Dot(toHands, up)).Length() * a.Scale;
+        if (behind is > 8f and < 30f && above is > 1f and < 14f && aside < 10f)
+        {
+            eye = origin;
+            source = "the file's origin (a viewmodel's eye)";
+        }
         if (Vector3.Dot(hands - eye, forward) < 1f / a.Scale)
             return null;
         var view = MathQ.FromAxes(forward, Vector3.Cross(up, forward));
-        return (Quaternion.Identity, new XForm(Canonical(eye), MathQ.Normalize(a.ModelToCanonical * view)), "the arms (the file has no camera)");
+        return (Quaternion.Identity, new XForm(Canonical(eye), MathQ.Normalize(a.ModelToCanonical * view)), source);
+    }
+
+    /// <summary>
+    /// Which way is up for arms without a camera: the file's up (+Z once loaded) unless the arms
+    /// say otherwise. The right arm must be on the right and the hands out in front, level with
+    /// the shoulders or below them. Rigs exported upside down or on their side (the hands above
+    /// the shoulders, the right arm on the left) get the axis that makes the arms read that way.
+    /// </summary>
+    internal static Vector3 ArmsUp(Vector3 reach, Vector3? rightward)
+    {
+        if (reach.Length() < 1e-4f)
+            return Vector3.UnitZ;
+        var r = Vector3.Normalize(reach);
+        var right = rightward is { } rv && rv.Length() > 1e-4f ? Vector3.Normalize(rv) : (Vector3?)null;
+        bool Reads(Vector3 up, out float forwardness)
+        {
+            forwardness = 0f;
+            if (right is { } rt && MathF.Abs(Vector3.Dot(rt, up)) > 0.5f)
+                return false;
+            var f = r - up * Vector3.Dot(r, up);
+            if (f.Length() < 0.2f)
+                return false;
+            f = Vector3.Normalize(f);
+            forwardness = Vector3.Dot(r, f);
+            // Up × forward points left: the right shoulder must be on the other side.
+            if (right is { } side && Vector3.Dot(Vector3.Cross(up, f), side) > -0.5f)
+                return false;
+            // Hands from level-ish (10 degrees above) to well below the shoulders.
+            var below = MathF.Asin(Math.Clamp(-Vector3.Dot(r, up), -1f, 1f)) * 180f / MathF.PI;
+            return below is > -10f and < 70f;
+        }
+        if (Reads(Vector3.UnitZ, out _))
+            return Vector3.UnitZ;
+        var best = Vector3.UnitZ;
+        var bestForward = float.MinValue;
+        foreach (var up in new[] { -Vector3.UnitZ, Vector3.UnitY, -Vector3.UnitY, Vector3.UnitX, -Vector3.UnitX })
+            if (Reads(up, out var forwardness) && forwardness > bestForward)
+            {
+                best = up;
+                bestForward = forwardness;
+            }
+        return best;
     }
 
     private static (Quaternion Axes, XForm Eye, string Source) EyeOf(WeaponAnalysis a, int camera)
