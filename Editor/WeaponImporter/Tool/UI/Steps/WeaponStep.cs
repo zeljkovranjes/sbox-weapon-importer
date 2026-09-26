@@ -22,7 +22,7 @@ public sealed class WeaponStep : StepPanel
 	{
 		var s = C.Setup;
 		var parts = string.Join( ",", s.Parts.Select( p => $"{p.Kind}:{p.Bone}:{p.Manual}" ) );
-		return $"{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( C.Analysis )}|{s.Type}|{parts}|{s.Muzzle is null}|{s.Eject is null}";
+		return $"{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( C.Analysis )}|{s.Type}|{parts}|{s.Muzzle is null}|{s.Eject is null}|{s.ArmsSource}|{C.Session.ArmsFit?.ArmsPath}";
 	}
 
 	protected override void Build()
@@ -46,10 +46,52 @@ public sealed class WeaponStep : StepPanel
 		var a = C.Analysis;
 		var summary = $"{a.Asset.Skeleton.Count} bones · {a.WeaponTriangles.Length:N0} triangles · {a.Asset.Clips.Count} animation{(a.Asset.Clips.Count == 1 ? "" : "s")} · {a.Length:0.#} in long";
 		card.Layout.Add( UiStyle.Muted( new Label( summary, card ) { WordWrap = true }, small: true ) );
+		BuildArms( card );
 		var row = card.Layout.AddRow();
 		row.Spacing = 6;
 		row.Add( UiStyle.Secondary( card, "Copy from existing weapon…", "content_copy", CopyFromTemplate, "Take grips, animation mapping, events and attachments from a weapon you already set up (*.weapon.json)" ) );
 		row.AddStretchCell();
+	}
+
+	/// <summary>First-person arms: the file's own, a pack's separate arms model, or none.</summary>
+	private void BuildArms( Widget card )
+	{
+		var session = C.Session;
+		var fit = session.ArmsFit;
+		var choice = C.Setup.ArmsSource ?? "";
+		var row = UiStyle.FieldRow( card, card.Layout, "Arms", "First-person arms. Packs that ship one arms model for all their weapons are found automatically; the weapon goes in the arms' item bone." );
+		string text;
+		if ( fit is not null )
+			text = $"{System.IO.Path.GetFileName( fit.ArmsPath )} · held in {fit.AttachBone} · {fit.Clips} animations";
+		else if ( C.Analysis.ArmBones.Count > 0 )
+			text = $"in the file ({C.Analysis.ArmBones.Count} bones)";
+		else
+			text = choice == WeaponSetup.NoArms ? "none (turned off)" : "none found";
+		row.Add( new Label( text, card ) { WordWrap = true, MinimumWidth = 20, ToolTip = fit?.ArmsPath ?? "" }, 1 );
+		row.Add( UiStyle.Icon( card, "folder_open", ChooseArms, "Use first-person arms from another file (an arms model with animations named after this weapon)" ) );
+		if ( choice.Length > 0 )
+			row.Add( UiStyle.Icon( card, "auto_fix_high", () => SetArms( "" ), "Find the pack's arms automatically" ) );
+		if ( fit is not null )
+			row.Add( UiStyle.Icon( card, "block", () => SetArms( WeaponSetup.NoArms ), "Import without these arms" ) );
+		if ( fit is not null )
+		{
+			var hands = fit.LeftError > 0f ? $"palms {fit.RightError:0.0} / {fit.LeftError:0.0} in from the grips" : $"palm {fit.RightError:0.0} in from the grip";
+			Indented( card, $"{char.ToUpperInvariant( fit.Reason[0] )}{fit.Reason[1..]}; {hands}." );
+		}
+	}
+
+	private void ChooseArms()
+	{
+		var start = System.IO.Path.GetDirectoryName( C.Session.ArmsFit?.ArmsPath ?? C.Session.SourcePath );
+		var path = EditorUtility.OpenFileDialog( "First-person arms", "FBX (*.fbx)", start );
+		if ( !string.IsNullOrEmpty( path ) )
+			SetArms( path );
+	}
+
+	private void SetArms( string choice )
+	{
+		var session = C.Session;
+		Safe( () => _ = C.RunAsync( "Loading arms", ( p, c ) => session.SetArmsAsync( choice, p, c ) ) );
 	}
 
 	private void CopyFromTemplate()

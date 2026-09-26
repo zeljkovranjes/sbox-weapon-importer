@@ -29,6 +29,11 @@ Everything goes to `Assets/weapons/<name>/`. Put `<name>.prefab` under your play
 Clips are recognised by name (idle, fire, reload, draw, aim in/out...). Anything that isn't can be
 assigned on the **Animations** page: click a row and search for the clip.
 
+Packs that ship pieces separately work too: animations in their own files next to the model (or in
+an `Animations` folder) are picked up, and a pack's shared arms model (for example `FP_Arms.fbx`
+with `FP_Arms_Pistol_01_Fire.fbx`) is found and the weapon put in its hands. Choose other arms or
+turn them off in the **Arms** row on the **Weapon** page.
+
 ## From your game code
 
 Actions come from the character's animgraph (`b_attack`, `b_reload`, `b_deploy`) or

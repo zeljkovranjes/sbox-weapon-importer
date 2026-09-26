@@ -41,7 +41,8 @@ public static class WeaponLoader
         return name.Length > 48 ? name[..48] : name;
     }
 
-    public static WeaponAsset Load(string path)
+    /// <param name="withAnimationFiles">Also add the clips of animation-only files beside it (see <see cref="AnimationFiles"/>).</param>
+    public static WeaponAsset Load(string path, bool withAnimationFiles = true)
     {
         if (!File.Exists(path))
             throw new WeaponImportException($"File not found: {path}");
@@ -56,7 +57,7 @@ public static class WeaponLoader
         }
         var dir = Path.GetDirectoryName(path) ?? "";
         var asset = Load(data, path, uri => File.ReadAllBytes(Path.Combine(dir, Uri.UnescapeDataString(uri))));
-        return AnimationFiles.Merge(asset, path);
+        return withAnimationFiles ? AnimationFiles.Merge(asset, path) : asset;
     }
 
     public static WeaponAsset Load(byte[] data, string path, Func<string, byte[]>? externalBuffers = null)

@@ -380,9 +380,17 @@ public static class WeaponAnalyzer
     private static HashSet<int> FindArmBones(Skeleton skeleton)
     {
         var arms = new HashSet<int>();
+        // Everything hanging from a socket ("hand_item_r", "weapon_attach") is the held item, not
+        // the hand, whatever its bones are called (a shotgun's pump is its "Forearm").
+        var held = new HashSet<int>();
         for (var i = 0; i < skeleton.Count; i++)
         {
             var parent = skeleton[i].ParentIndex;
+            if (parent >= 0 && (held.Contains(parent) || (arms.Contains(parent) && IsSocketName(skeleton[parent].Name))))
+            {
+                held.Add(i);
+                continue;
+            }
             if (IsArmBoneName(skeleton[i].Name) || (parent >= 0 && arms.Contains(parent) && !IsWeaponName(skeleton[i].Name)))
                 arms.Add(i);
         }
@@ -396,10 +404,14 @@ public static class WeaponAnalyzer
         return arms;
     }
 
+    /// <summary>A bone items are attached to: "hand_item_r", "prop_R", "weapon_socket".</summary>
+    public static bool IsSocketName(string name)
+        => NameTokens.Has(NameTokens.Split(name), "item", "prop", "socket", "attach", "attachment", "holder", "weapon", "gun", "wpn");
+
     private static bool IsWeaponName(string name)
     {
         var tokens = NameTokens.Split(name);
-        return NameTokens.Has(tokens, "weapon", "gun", "wpn", "rifle", "pistol") || PartNames.Any(p => NameTokens.Has(tokens, p.Aliases));
+        return NameTokens.Has(tokens, "weapon", "gun", "wpn", "rifle", "pistol", "shotgun", "smg", "sniper", "launcher", "revolver") || PartNames.Any(p => NameTokens.Has(tokens, p.Aliases));
     }
 
     private static readonly string[] NonWeaponParts =

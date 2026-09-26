@@ -73,7 +73,8 @@ public sealed class ImportSession : IDisposable
         return session;
     }
 
-    public async Task ReloadAsync( IProgress<string> progress = null, CancellationToken cancel = default )
+    /// <param name="keep">The setup to keep (the current one when a setting that changes the loaded model changed); else the one saved beside the last bake.</param>
+    public async Task ReloadAsync( IProgress<string> progress = null, CancellationToken cancel = default, WeaponSetup keep = null )
     {
         var path = SourcePath;
         var ext = System.IO.Path.GetExtension( path ).ToLowerInvariant();
@@ -91,18 +92,48 @@ public sealed class ImportSession : IDisposable
             asset = await Task.Run( () => WeaponLoader.Load( path ), cancel );
         }
         cancel.ThrowIfCancellationRequested();
-        SourceAsset = asset;
 
         // Existing setup next to a previous import keeps every manual choice.
         await EditorThread.SwitchToMainThread();
-        var previous = TryLoadSetup( $"weapons/{asset.Name}/{asset.Name}.weapon.json" );
+        var previous = keep ?? TryLoadSetup( $"weapons/{asset.Name}/{asset.Name}.weapon.json" );
+
+        // First-person arms shipped separately (one arms model for a whole pack).
+        var isVmdl = ext is ".vmdl" or ".vmdl_c";
+        ArmsFit = null;
+        var armsChoice = previous?.ArmsSource ?? "";
+        string armsPath = null;
+        if ( !isVmdl && armsChoice != WeaponSetup.NoArms )
+        {
+            armsPath = armsChoice.Length > 0 ? (System.IO.File.Exists( armsChoice ) ? armsChoice : null)
+                : HasOwnArms( asset ) ? null : await Task.Run( () => FirstPersonArms.Find( path ), cancel );
+            if ( armsChoice.Length > 0 && armsPath is null )
+                asset.Notes.Add( $"The first-person arms file '{armsChoice}' was not found." );
+        }
+        if ( armsPath is not null )
+        {
+            Report( progress, $"Putting the weapon in {System.IO.Path.GetFileName( armsPath )}" );
+            var source = asset;
+            var (combined, fit) = await Task.Run( () => (FirstPersonArms.Combine( source, path, armsPath, out var f, null, cancel ), f), cancel );
+            if ( combined is not null )
+            {
+                asset = combined;
+                ArmsFit = fit;
+            }
+            else
+            {
+                asset.Notes.Add( $"{System.IO.Path.GetFileName( armsPath )} has no animations for this weapon; imported without first-person arms." );
+            }
+        }
+        await EditorThread.SwitchToMainThread();
+        SourceAsset = asset;
         var options = previous is { OrientationManual: true } ? new AnalyzeOptions { Rotation = previous.ModelRotationQ, Scale = previous.Scale, ReferenceClip = previous.ReferenceClip } : new AnalyzeOptions();
         _analyzeOptions = options;
 
-        // Attach Textures: images beside the model that belong to its materials.
+        // Attach Textures: images beside the model (and the arms) that belong to its materials.
         Report( progress, "Looking for textures" );
-        var isVmdl = ext is ".vmdl" or ".vmdl_c";
-        TextureMatches = isVmdl ? new List<TextureMatch>() : await Task.Run( () => TextureMatcher.Match( asset, path ), cancel );
+        var folders = TextureMatcher.SearchFolders( path ).Concat( ArmsFit is { } arms ? TextureMatcher.SearchFolders( arms.ArmsPath ) : Enumerable.Empty<string>() ).Distinct( StringComparer.OrdinalIgnoreCase ).ToList();
+        var matchAsset = asset;
+        TextureMatches = isVmdl ? new List<TextureMatch>() : await Task.Run( () => TextureMatcher.Match( matchAsset, path, TextureMatcher.FindImages( folders ) ), cancel );
         Asset = WithTextures( asset, previous ?? new WeaponSetup() );
 
         Report( progress, "Analyzing weapon" );
@@ -119,6 +150,20 @@ public sealed class ImportSession : IDisposable
     }
 
     /// <summary>Re-runs the analysis with changed orientation/scale/reference options, keeping manual choices.</summary>
+    /// <summary>How the weapon was put in separate first-person arms; null when it wasn't.</summary>
+    public ArmsFit ArmsFit { get; private set; }
+
+    /// <summary>The weapon file has first-person arms of its own (then no separate arms are looked for).</summary>
+    private static bool HasOwnArms( WeaponAsset asset )
+        => asset.Skeleton.Bones.Any( b => WeaponAnalyzer.IsArmBoneName( b.Name ) ) && WeaponImporter.Core.Hands.HandRig.Build( asset.Skeleton, WeaponImporter.Core.Hands.Side.Right ) is not null;
+
+    /// <summary>Use first-person arms from another file: "" finds the pack's automatically, <see cref="WeaponSetup.NoArms"/> none, else that file.</summary>
+    public Task SetArmsAsync( string choice, IProgress<string> progress = null, CancellationToken cancel = default )
+    {
+        Setup.ArmsSource = choice ?? "";
+        return ReloadAsync( progress, cancel, Setup );
+    }
+
     public async Task ReanalyzeAsync( AnalyzeOptions options, IProgress<string> progress = null, CancellationToken cancel = default )
     {
         Report( progress, "Analyzing weapon" );

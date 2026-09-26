@@ -235,8 +235,17 @@ public static class TextureMatcher
         return words;
     }
 
-    /// <summary>"gloves" and "glove" are the same word ("M_Gloves" / "T_Glove_normal").</summary>
-    private static string Singular(string w) => w.Length > 3 && w[^1] == 's' && w[^2] != 's' && !char.IsDigit(w[^2]) ? w[..^1] : w;
+    /// <summary>
+    /// "gloves" and "glove" are the same word ("M_Gloves" / "T_Glove_normal"); a plural never
+    /// becomes a format or channel word ("arms" is not a packed "arm" map).
+    /// </summary>
+    private static string Singular(string w)
+    {
+        if (w.Length <= 3 || w[^1] != 's' || w[^2] == 's' || char.IsDigit(w[^2]))
+            return w;
+        var one = w[..^1];
+        return FormatWords.Contains(one) || SlotOfWord(one) is not null ? w : one;
+    }
 
     /// <summary>
     /// What a material is about. A generic one ("Weapon", "M_Gun") is named after the weapon
@@ -369,7 +378,10 @@ public static class TextureMatcher
                 // Everything the image is named after belongs to this material alone ("T_Glove_normal"
                 // and only "M_Gloves_Black" says glove): as sure as a full name match.
                 var own = shared.Where(t => !ubiquitous.Contains(t)).ToList();
-                if (slots is not null && coverage >= 0.999f && own.All(t => perMaterial.Where((s, i) => i != materialIndex).All(s => !s.Contains(t))))
+                // "FPS_Arms_Albedo" for "Arms_MI": a first/third-person marker isn't a different subject.
+                var subject = imageOwn.Where(t => t is not ("fp" or "fps" or "tp" or "tps" or "1p" or "3p" or "vm" or "wm")).ToList();
+                var subjectCoverage = subject.Count == 0 ? 0f : distinctive / (float)subject.Count;
+                if (slots is not null && subjectCoverage >= 0.999f && own.All(t => perMaterial.Where((s, i) => i != materialIndex).All(s => !s.Contains(t))))
                 {
                     confidence = MathF.Max(confidence, 0.65f);
                     reason = $"only this material is named \"{string.Join(" ", own)}\"";

@@ -22,7 +22,7 @@ public static class AnimationClassifier
     private sealed record Rule(AnimationRole Role, string[] Any, string[]? Joined = null, string[]? Requires = null, string[]? Excludes = null, float Weight = 1f);
 
     private static readonly string[] AimTokens = { "ads", "aim", "aiming", "iron", "ironsight", "ironsights", "sight", "sights", "zoom", "scope" };
-    private static readonly string[] AimLoopTokens = { "idle", "loop", "hold", "pose", "static", "aiming" };
+    private static readonly string[] AimLoopTokens = { "idle", "loop", "hold", "pose", "static", "aiming", "breathing", "breath" };
     private static readonly string[] AimOutTokens = { "out", "exit", "end", "lower", "leave", "stop", "release" };
 
     // Order matters only for ties; more specific rules carry higher weights.
@@ -56,7 +56,7 @@ public static class AnimationClassifier
         new(AnimationRole.AdsIdle, AimLoopTokens, new[] { "aimidle", "adsidle", "aimloop", "adsloop", "ironidle", "zoomidle", "aimhold", "adshold", "aimingidle" }, Requires: AimTokens, Excludes: AimOutTokens.Concat(new[] { "fire", "shoot" }).ToArray(), Weight: 1.3f),
         new(AnimationRole.AdsOut, AimOutTokens.Concat(new[] { "unaim", "unads", "adsout", "aimout" }).ToArray(), new[] { "aimout", "adsout", "ironout", "zoomout", "sightout", "scopeout", "unaim", "unads", "aimexit", "adsexit", "aimend", "adsend" }, Requires: AimTokens.Concat(new[] { "unaim", "unads", "adsout", "aimout" }).ToArray(), Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
         new(AnimationRole.Melee, new[] { "melee", "bash", "stab", "slash", "swing", "hit", "knife", "punch", "butt", "strike", "attackmelee" }, new[] { "meleeattack" }, Weight: 1.1f),
-        new(AnimationRole.Idle, new[] { "idle", "rest", "hold", "static", "pose", "bind", "stand", "base", "default" }, Excludes: new[] { "to", "fire", "reload" }, Weight: 0.9f),
+        new(AnimationRole.Idle, new[] { "idle", "rest", "hold", "static", "pose", "bind", "stand", "base", "default", "breathing", "breath", "breathe" }, new[] { "breathing", "idleloop" }, Excludes: new[] { "to", "fire", "reload" }, Weight: 0.9f),
     };
 
     private static readonly string[] FirstPersonTokens = { "fp", "1p", "vm", "v", "view", "viewmodel", "arms", "firstperson", "fps" };

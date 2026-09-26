@@ -159,6 +159,20 @@ public static class AnimationFiles
         if (shared < Math.Max(2, MinBoneMatch * skeleton.Count))
             return null;
 
+        // Exported with other bone axes than the model (its never-moving armature root turned by
+        // 90/180 degrees): re-express every bone in the model's axes, keeping how it moves in the
+        // world. The file's first frame is the pose it was authored from (the model's rest).
+        var convert = ConventionDiffers(target, skeleton, clips, map);
+        XForm[]? toModel = null;
+        if (convert && clips.FirstOrDefault(c => c.FrameCount > 0) is { } first)
+        {
+            var refWorld = new Pose(first.Frames[0]).ToWorld(skeleton);
+            var restWorld = target.RestWorld;
+            toModel = new XForm[target.Count];
+            for (var i = 0; i < target.Count; i++)
+                toModel[i] = map[i] >= 0 ? XForm.Compose(refWorld[map[i]].Inverse(), restWorld[i]) : XForm.Identity;
+        }
+
         var result = new List<Clip>(clips.Count);
         foreach (var clip in clips)
         {
@@ -168,8 +182,23 @@ public static class AnimationFiles
             foreach (var frame in clip.Frames)
             {
                 var locals = new XForm[target.Count];
-                for (var i = 0; i < target.Count; i++)
-                    locals[i] = map[i] >= 0 && map[i] < frame.Length ? frame[map[i]] : target[i].RestLocal;
+                if (toModel is not null)
+                {
+                    var world = new Pose(frame).ToWorld(skeleton);
+                    var modelWorld = new XForm[target.Count];
+                    for (var i = 0; i < target.Count; i++)
+                    {
+                        var parent = target[i].ParentIndex;
+                        modelWorld[i] = map[i] >= 0 ? XForm.Compose(world[map[i]], toModel[i])
+                            : parent >= 0 ? XForm.Compose(modelWorld[parent], target[i].RestLocal) : target[i].RestLocal;
+                        locals[i] = parent >= 0 ? XForm.Compose(modelWorld[parent].Inverse(), modelWorld[i]) : modelWorld[i];
+                    }
+                }
+                else
+                {
+                    for (var i = 0; i < target.Count; i++)
+                        locals[i] = map[i] >= 0 && map[i] < frame.Length ? frame[map[i]] : target[i].RestLocal;
+                }
                 frames.Add(locals);
             }
             var clipName = clips.Count == 1 ? name : $"{name}_{TakeName(clip.Name)}";
@@ -177,6 +206,29 @@ public static class AnimationFiles
         }
         return result;
     }
+
+    /// <summary>
+    /// The file's armature root never moves yet sits turned against the model's (by more than
+    /// 60 degrees): the file was exported with other bone axes, not posed differently.
+    /// </summary>
+    private static bool ConventionDiffers(Skeleton target, Skeleton file, List<Clip> clips, int[] map)
+    {
+        for (var i = 0; i < target.Count; i++)
+        {
+            if (target[i].ParentIndex >= 0 || map[i] < 0)
+                continue;
+            var j = map[i];
+            if (Angle(target[i].RestLocal.Rot, file[j].RestLocal.Rot) < 60f)
+                continue;
+            var still = clips.All(c => c.Frames.All(f => j < f.Length && Angle(f[j].Rot, file[j].RestLocal.Rot) < 1f && System.Numerics.Vector3.Distance(f[j].Pos, file[j].RestLocal.Pos) < 0.05f));
+            if (still)
+                return true;
+        }
+        return false;
+    }
+
+    private static float Angle(System.Numerics.Quaternion a, System.Numerics.Quaternion b)
+        => 2f * MathF.Acos(MathF.Min(1f, MathF.Abs(System.Numerics.Quaternion.Dot(a, b)))) * 57.29578f;
 
     /// <summary>"RIG_Comando_Fire" beside "RIG_Comando" is "Fire"; unrelated names stay whole.</summary>
     public static string ClipName(string weaponStem, string fileStem)

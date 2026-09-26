@@ -87,6 +87,14 @@ public sealed class WeaponSetup
     /// </summary>
     public bool ExportFirstPerson { get; set; } = true;
 
+    /// <summary>
+    /// First-person arms from another file (packs that ship one arms model for all their weapons):
+    /// "" finds them automatically, <see cref="NoArms"/> uses none, else the arms model's path.
+    /// </summary>
+    public string ArmsSource { get; set; } = "";
+
+    public const string NoArms = "none";
+
     /// <summary>Largest texture side written by the bake (bigger images are scaled down); 0 keeps them as they are.</summary>
     public int MaxTextureSize { get; set; } = 2048;
 
