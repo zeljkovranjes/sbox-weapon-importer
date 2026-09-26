@@ -55,7 +55,8 @@ public static class WeaponLoader
             throw new WeaponImportException($"Could not read {Path.GetFileName(path)}: {e.Message}", e);
         }
         var dir = Path.GetDirectoryName(path) ?? "";
-        return Load(data, path, uri => File.ReadAllBytes(Path.Combine(dir, Uri.UnescapeDataString(uri))));
+        var asset = Load(data, path, uri => File.ReadAllBytes(Path.Combine(dir, Uri.UnescapeDataString(uri))));
+        return AnimationFiles.Merge(asset, path);
     }
 
     public static WeaponAsset Load(byte[] data, string path, Func<string, byte[]>? externalBuffers = null)

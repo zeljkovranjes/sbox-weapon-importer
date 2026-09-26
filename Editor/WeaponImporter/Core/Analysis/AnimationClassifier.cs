@@ -36,9 +36,9 @@ public static class AnimationClassifier
         new(AnimationRole.TacticalReload, new[] { "reload", "rld", "reloading" }, new[] { "reloadtac", "tacreload", "reloadtactical", "tacticalreload", "reloadshort", "reloadpartial" }, Requires: new[] { "tac", "tactical", "short", "partial", "fast", "speed" }, Weight: 1.3f),
         new(AnimationRole.Reload, new[] { "reload", "rld", "reloading", "magswap", "magchange" }, Excludes: new[] { "start", "end", "loop", "insert", "begin", "enter", "finish", "exit", "shell", "single" }),
         // Shell-by-shell reloads (shotguns, tube-fed rifles): start / one shell / end.
-        new(AnimationRole.ReloadStart, new[] { "start", "begin", "enter", "open", "in", "intro" }, new[] { "reloadstart", "startreload", "reloadbegin", "reloadenter", "reloadopen", "reloadintro" }, Requires: new[] { "reload", "rld", "reloading", "load", "loading" }, Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
-        new(AnimationRole.ReloadInsert, new[] { "insert", "loop", "shell", "single", "load", "inserting" }, new[] { "reloadinsert", "insertshell", "shellinsert", "reloadloop", "loadshell", "shellload", "reloadshell", "reloadsingle", "insertround", "loadround" }, Requires: new[] { "reload", "rld", "reloading", "insert", "shell", "round", "load" }, Excludes: new[] { "start", "begin", "end", "finish", "exit", "fire", "shoot" }, Weight: 1.3f),
-        new(AnimationRole.ReloadEnd, new[] { "end", "finish", "exit", "close", "out", "outro", "stop" }, new[] { "reloadend", "endreload", "reloadfinish", "reloadexit", "reloadclose", "reloadoutro" }, Requires: new[] { "reload", "rld", "reloading", "load", "loading" }, Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
+        new(AnimationRole.ReloadStart, new[] { "start", "begin", "enter", "open", "in", "intro" }, new[] { "reloadstart", "startreload", "reloadbegin", "reloadenter", "reloadopen", "reloadintro", "idletoreload", "toreload" }, Requires: new[] { "reload", "rld", "reloading", "load", "loading" }, Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
+        new(AnimationRole.ReloadInsert, new[] { "insert", "loop", "shell", "single", "load", "inserting", "step" }, new[] { "reloadinsert", "reloadstep", "insertshell", "shellinsert", "reloadloop", "loadshell", "shellload", "reloadshell", "reloadsingle", "insertround", "loadround" }, Requires: new[] { "reload", "rld", "reloading", "insert", "shell", "round", "load" }, Excludes: new[] { "start", "begin", "end", "finish", "exit", "fire", "shoot" }, Weight: 1.3f),
+        new(AnimationRole.ReloadEnd, new[] { "end", "finish", "exit", "close", "out", "outro", "stop" }, new[] { "reloadend", "endreload", "reloadfinish", "reloadexit", "reloadclose", "reloadoutro", "reloadtoidle", "reloadto" }, Requires: new[] { "reload", "rld", "reloading", "load", "loading" }, Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
 
         new(AnimationRole.Unjam, new[] { "unjam", "clear", "clearjam", "fixjam", "malfunctionclear", "tapack", "remedy" }, new[] { "unjam", "clearjam", "fixjam", "jamclear", "jamfix" }, Weight: 1.3f),
         new(AnimationRole.Jam, new[] { "jam", "jammed", "malfunction", "misfire", "stovepipe" }, Excludes: new[] { "clear", "fix", "un" }),
@@ -98,6 +98,9 @@ public static class AnimationClassifier
 
             if (rule.Excludes is { } ex && NameTokens.Has(tokens, ex))
                 score *= 0.45f;
+            // The role's own word ("Idle") beats a synonym ("Hold") on a tie.
+            if (tokens.Contains(rule.Any[0]))
+                score += 0.02f;
             score *= rule.Weight;
 
             if (score > bestScore)
@@ -151,6 +154,14 @@ public static class AnimationClassifier
                 result[AnimationRole.Reload] = tac with { Role = AnimationRole.Reload, Confidence = tac.Confidence * 0.9f, Reason = "tactical reload used as reload" };
             else if (result.TryGetValue(AnimationRole.EmptyReload, out var empty))
                 result[AnimationRole.Reload] = empty with { Role = AnimationRole.Reload, Confidence = empty.Confidence * 0.85f, Reason = "empty reload used as reload" };
+        }
+        // "IdleToReload" / "Reload" / "ReloadToIdle": between a start and an end, the plain
+        // reload is the one-shell part.
+        if (result.ContainsKey(AnimationRole.ReloadStart) && result.ContainsKey(AnimationRole.ReloadEnd)
+            && !result.ContainsKey(AnimationRole.ReloadInsert) && result.TryGetValue(AnimationRole.Reload, out var middle))
+        {
+            result[AnimationRole.ReloadInsert] = middle with { Role = AnimationRole.ReloadInsert, Reason = "reload between a reload start and end" };
+            result.Remove(AnimationRole.Reload);
         }
         if (!result.ContainsKey(AnimationRole.Fire) && result.TryGetValue(AnimationRole.AdsFire, out var adsFire))
             result[AnimationRole.Fire] = adsFire with { Role = AnimationRole.Fire, Confidence = adsFire.Confidence * 0.8f, Reason = "ADS fire used as fire" };

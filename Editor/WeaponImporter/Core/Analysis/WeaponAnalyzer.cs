@@ -387,7 +387,13 @@ public static class WeaponAnalyzer
                 arms.Add(i);
         }
         // A skeleton that is "all arms" is really a mislabelled weapon; keep it.
-        return arms.Count >= skeleton.Count ? new HashSet<int>() : arms;
+        if (arms.Count >= skeleton.Count)
+            return new HashSet<int>();
+        // Arms end in hands: a lone "Forearm" or "Camera" bone without a hand or fingers is a
+        // part of the weapon (a shotgun's pump is its forearm).
+        if (!arms.Any(b => NameTokens.Has(NameTokens.Split(skeleton[b].Name), "hand", "hands", "finger", "thumb", "palm", "wrist", "index", "pinky")))
+            return new HashSet<int>();
+        return arms;
     }
 
     private static bool IsWeaponName(string name)

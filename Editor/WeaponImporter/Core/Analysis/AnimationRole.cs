@@ -80,6 +80,8 @@ public static class AnimationRoles
     public static AnimationRole? Fallback(AnimationRole role) => role switch
     {
         AnimationRole.TacticalReload or AnimationRole.EmptyReload => AnimationRole.Reload,
+        // A shotgun that loads shell by shell has no whole reload: the one-shell part stands in.
+        AnimationRole.Reload => AnimationRole.ReloadInsert,
         AnimationRole.FireEmpty or AnimationRole.AdsFire => AnimationRole.Fire,
         AnimationRole.Ads or AnimationRole.Walk or AnimationRole.Inspect => AnimationRole.Idle,
         AnimationRole.Sprint => AnimationRole.Walk,

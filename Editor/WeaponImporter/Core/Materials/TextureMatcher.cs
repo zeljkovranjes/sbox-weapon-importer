@@ -127,11 +127,15 @@ public static class TextureMatcher
         images ??= FindImages(SearchFolders(modelPath));
         var materials = asset.Mesh.Materials;
         var modelSubject = SubjectTokens(System.IO.Path.GetFileNameWithoutExtension(modelPath));
+        var placeSubject = PlaceTokens(modelPath);
         // Words shared by most of this weapon's textures (its own name) are judged among the
         // images that relate to it, not every image in the neighbouring folders.
         var known = materials.SelectMany(m => SubjectTokens(m.Name)).Concat(modelSubject).ToHashSet(StringComparer.Ordinal);
         var related = images.Where(i => SubjectTokens(Stem(i)).Any(known.Contains)).ToList();
         var ubiquitous = UbiquitousTokens(related.Count >= 3 ? related : images);
+        // A word that tells this weapon's materials apart ("glove" vs "shirt") is never its shared name.
+        var perMaterial = materials.Select(m => MaterialTokens(m.Name, placeSubject).ToHashSet(StringComparer.Ordinal)).ToList();
+        ubiquitous.RemoveWhere(t => perMaterial.Any(s => s.Contains(t)) && !perMaterial.All(s => s.Contains(t)));
         var result = new List<TextureMatch>();
         for (var m = 0; m < materials.Count; m++)
         {
@@ -144,7 +148,7 @@ public static class TextureMatcher
                     continue;
                 }
             }
-            foreach (var match in MatchByName(m, material.Name, images, ubiquitous, materials.Count, modelSubject))
+            foreach (var match in MatchByName(m, material.Name, images, ubiquitous, materials.Count, modelSubject, placeSubject, perMaterial))
                 if (Get(material, match.Slot) is null)
                     result.Add(match);
         }
@@ -210,7 +214,61 @@ public static class TextureMatcher
         return stem;
     }
 
-    private static List<string> Words(string name) => NameTokens.Split(name).Where(w => !(w.Length == 4 && w.All(char.IsDigit))).ToList();
+    private static List<string> Words(string name)
+    {
+        var tokens = NameTokens.Split(name);
+        var words = new List<string>(tokens.Length);
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            var w = tokens[i];
+            // "4k" splits into "4" + "k": keep it one (format) word.
+            if (w.All(char.IsDigit) && i + 1 < tokens.Length && tokens[i + 1] == "k")
+            {
+                words.Add(w + "k");
+                i++;
+                continue;
+            }
+            if (w.Length == 4 && w.All(char.IsDigit))
+                continue;
+            words.Add(Singular(w));
+        }
+        return words;
+    }
+
+    /// <summary>"gloves" and "glove" are the same word ("M_Gloves" / "T_Glove_normal").</summary>
+    private static string Singular(string w) => w.Length > 3 && w[^1] == 's' && w[^2] != 's' && !char.IsDigit(w[^2]) ? w[..^1] : w;
+
+    /// <summary>
+    /// What a material is about. A generic one ("Weapon", "M_Gun") is named after the weapon
+    /// itself: its textures carry the weapon's name, which the file and its folders ("spas-12/") hold.
+    /// </summary>
+    private static List<string> MaterialTokens(string materialName, List<string> placeSubject)
+    {
+        var tokens = SubjectTokens(materialName);
+        return tokens.All(GenericMaterialWords.Contains) ? placeSubject : tokens;
+    }
+
+    /// <summary>Material names that say nothing about which part of the model they cover.</summary>
+    private static readonly HashSet<string> GenericMaterialWords = new(StringComparer.Ordinal)
+    {
+        "m", "mi", "mat", "mtl", "material", "weapon", "gun", "main", "body", "default", "standard", "lambert", "phong", "blinn", "surface", "mesh", "model", "base",
+    };
+
+    /// <summary>Folders that say nothing about what the model is.</summary>
+    private static readonly HashSet<string> GenericFolderWords = new(StringComparer.Ordinal)
+    {
+        "fbx", "gltf", "glb", "obj", "source", "model", "mesh", "export", "file", "asset", "content", "download", "weapon", "gun", "art", "3d", "blend", "blender", "ue5", "ue4", "unity", "rig",
+    };
+
+    /// <summary>What the model's file and its four nearest folders are named after.</summary>
+    private static List<string> PlaceTokens(string modelPath)
+    {
+        var tokens = SubjectTokens(System.IO.Path.GetFileNameWithoutExtension(modelPath)).ToList();
+        var dir = System.IO.Path.GetDirectoryName(modelPath);
+        for (var i = 0; i < 4 && !string.IsNullOrEmpty(dir); i++, dir = System.IO.Path.GetDirectoryName(dir))
+            tokens.AddRange(SubjectTokens(System.IO.Path.GetFileName(dir)));
+        return tokens.Where(t => !GenericFolderWords.Contains(t) && !GenericMaterialWords.Contains(t) && !t.All(char.IsDigit)).Distinct().ToList();
+    }
 
     /// <summary>Name words without channel/format words: what the texture or material is about.</summary>
     private static List<string> SubjectTokens(string name)
@@ -240,7 +298,7 @@ public static class TextureMatcher
         for (var i = words.Count - 1; i >= 0; i--)
         {
             var w = words[i];
-            if (w is "opengl" or "open" or "gl" or "ogl" or "directx" or "direct" or "dx" or "srgb" or "1k" or "2k" or "4k" or "8k")
+            if (w is "opengl" or "open" or "gl" or "ogl" or "directx" or "direct" or "x" or "dx" or "srgb" or "1k" or "2k" or "4k" or "8k")
                 continue;
             if (w is "orm" or "arm")
                 return new() { (TextureSlot.AmbientOcclusion, TextureChannel.R), (TextureSlot.Roughness, TextureChannel.G), (TextureSlot.Metalness, TextureChannel.B) };
@@ -265,9 +323,9 @@ public static class TextureMatcher
         return counts.Where(kv => kv.Value >= 3 && kv.Value * 2 >= images.Count).Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
     }
 
-    private static IEnumerable<TextureMatch> MatchByName(int materialIndex, string materialName, IReadOnlyList<string> images, HashSet<string> ubiquitous, int materialCount, List<string> modelSubject)
+    private static IEnumerable<TextureMatch> MatchByName(int materialIndex, string materialName, IReadOnlyList<string> images, HashSet<string> ubiquitous, int materialCount, List<string> modelSubject, List<string> placeSubject, List<HashSet<string>> perMaterial)
     {
-        var materialTokens = SubjectTokens(materialName);
+        var materialTokens = MaterialTokens(materialName, placeSubject);
         var best = new Dictionary<TextureSlot, TextureMatch>();
         foreach (var image in images)
         {
@@ -308,6 +366,14 @@ public static class TextureMatcher
                 if (slots is null)
                     confidence *= 0.7f;
                 reason = $"name shares \"{string.Join(" ", shared)}\"";
+                // Everything the image is named after belongs to this material alone ("T_Glove_normal"
+                // and only "M_Gloves_Black" says glove): as sure as a full name match.
+                var own = shared.Where(t => !ubiquitous.Contains(t)).ToList();
+                if (slots is not null && coverage >= 0.999f && own.All(t => perMaterial.Where((s, i) => i != materialIndex).All(s => !s.Contains(t))))
+                {
+                    confidence = MathF.Max(confidence, 0.65f);
+                    reason = $"only this material is named \"{string.Join(" ", own)}\"";
+                }
             }
             foreach (var (slot, channel) in slots ?? new() { (TextureSlot.BaseColor, TextureChannel.All) })
             {

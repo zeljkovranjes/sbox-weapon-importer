@@ -95,6 +95,10 @@ public static class WeaponClassifier
         if (hasCylinder) Score(WeaponType.Revolver, 1.2f, "rotating cylinder");
         if (hasSlide) Score(WeaponType.Pistol, 0.8f, "slide");
         if (hasPump) Score(WeaponType.Shotgun, 1.0f, "pump");
+        // Loading shell by shell (start / one shell / end clips) is what shotguns do.
+        var reloadRoles = a.Asset.Clips.Select(c => AnimationClassifier.Classify(c.Name).Role).ToHashSet();
+        if (reloadRoles.Contains(AnimationRole.ReloadInsert) || (reloadRoles.Contains(AnimationRole.ReloadStart) && reloadRoles.Contains(AnimationRole.ReloadEnd)))
+            Score(WeaponType.Shotgun, 1.2f, "reloads shell by shell");
         if (hasScope && hasBolt && length > 34f) Score(WeaponType.Sniper, 0.8f, "long, scoped, bolt action");
 
         if (length is > 4f and < 12f && !hasStock) { Score(WeaponType.Pistol, 0.9f, $"compact ({length:0.#} in)"); Score(WeaponType.Revolver, 0.4f, $"compact ({length:0.#} in)"); }
