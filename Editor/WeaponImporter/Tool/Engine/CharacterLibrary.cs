@@ -54,6 +54,28 @@ public static class CharacterLibrary
     }
 
     /// <summary>
+    /// True when the model copies the ring finger onto the pinky with a constraint (the human
+    /// models do: "Citizen animations don't have a fifth finger"), so a pinky override never shows.
+    /// Read from the model's source; false when it has none.
+    /// </summary>
+    public static bool PinkyFollowsRing( string modelPath )
+    {
+        try
+        {
+            var source = Editor.AssetSystem.FindByPath( modelPath )?.GetSourceFile( true );
+            if ( string.IsNullOrEmpty( source ) || !System.IO.File.Exists( source ) )
+                return false;
+            return System.Text.RegularExpressions.Regex.IsMatch( System.IO.File.ReadAllText( source ),
+                @"parent_bone\s*=\s*""finger_ring_0_R""[^{}]*\}\s*,\s*\{[^{}]*AnimConstraintSlave[^{}]*parent_bone\s*=\s*""finger_pinky_0_R""" );
+        }
+        catch ( Exception e )
+        {
+            Log.Warning( $"Weapon importer: couldn't read the constraints of '{modelPath}': {e.Message}" );
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Bones the citizen and human animgraphs drive by name. A custom body (for example the
     /// citizen mannequin) often has only these: no IK, twist, hold or face helpers.
     /// </summary>

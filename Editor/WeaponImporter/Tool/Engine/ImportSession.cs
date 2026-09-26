@@ -203,7 +203,7 @@ public sealed class ImportSession : IDisposable
         CharacterRig rig;
         try
         {
-            rig = CharacterRig.From( poser.Skeleton ) ?? throw new InvalidOperationException( $"'{CharacterModel}' has no recognisable arms and hands." );
+            rig = CharacterRig.From( poser.Skeleton, CharacterLibrary.PinkyFollowsRing( CharacterModel ) ) ?? throw new InvalidOperationException( $"'{CharacterModel}' has no recognisable arms and hands." );
             await EditorThread.NextFrame( cancel );
             if ( !poser.Animates( rig, Setup.EffectiveHoldType ) )
                 throw new InvalidOperationException( $"{CharacterLibrary.Label( Setup.Character )}'s animation graph leaves its arms in the bind pose, so there is no hold animation to fit the grip to." );

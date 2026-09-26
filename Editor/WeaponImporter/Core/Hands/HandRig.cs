@@ -70,6 +70,12 @@ public sealed class HandRig
     public required float PalmWidth { get; init; }
     public float PalmThickness => HandLength * 0.14f;
 
+    /// <summary>
+    /// The character's model copies the ring finger onto the pinky (a constraint, like the
+    /// human's "CopyPinky"), so the pinky can't be posed on its own: poses give it the ring's angles.
+    /// </summary>
+    public bool PinkyFollowsRing { get; set; }
+
     public FingerRig? Finger(FingerKind kind) => Fingers.FirstOrDefault(f => f.Kind == kind);
 
     /// <summary>All bones this rig may rotate (arm chain and fingers).</summary>

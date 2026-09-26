@@ -483,7 +483,15 @@ public sealed class HandsStep : StepPanel
 		foreach ( var finger in hand.Fingers )
 		{
 			var kind = finger.Kind;
-			Slider( card, card.Layout, kind.ToString(), $"Curl of the {kind.ToString().ToLowerInvariant()}: left opens it, right closes it", 0f, 1.6f, 1f, v => $"{v * 100f:0}%", v => Curl( kind, v ) );
+			// The character's model copies the ring onto the pinky: one slider moves both.
+			if ( hand.PinkyFollowsRing && kind == FingerKind.Pinky )
+				continue;
+			var together = hand.PinkyFollowsRing && kind == FingerKind.Ring;
+			var label = together ? "Ring & pinky" : kind.ToString();
+			var tip = together
+				? "Curl of the ring and little fingers: left opens them, right closes them. This character's model copies the ring finger onto the pinky, so they move together."
+				: $"Curl of the {kind.ToString().ToLowerInvariant()}: left opens it, right closes it";
+			Slider( card, card.Layout, label, tip, 0f, 1.6f, 1f, v => $"{v * 100f:0}%", v => Curl( kind, v ) );
 		}
 		card.Layout.Add( UiStyle.Muted( new Label( "100% is the automatic fit. Changes are kept as a hand edit.", card ) { WordWrap = true }, small: true ) );
 	}

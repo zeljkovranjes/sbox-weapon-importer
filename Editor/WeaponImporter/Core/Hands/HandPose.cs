@@ -55,11 +55,13 @@ public sealed class HandPose
     public Quaternion LocalRotation(HandRig rig, FingerRig finger, int j)
     {
         var rest = rig.Skeleton[finger.Joints[j]].RestLocal.Rot;
-        var flex = Flex.TryGetValue(finger.Kind, out var f) && j < f.Length ? f[j] : 0f;
+        // What the character shows: a pinky its model copies from the ring takes the ring's angles.
+        var kind = rig.PinkyFollowsRing && finger.Kind == FingerKind.Pinky && Flex.ContainsKey(FingerKind.Ring) ? FingerKind.Ring : finger.Kind;
+        var flex = Flex.TryGetValue(kind, out var f) && j < f.Length ? f[j] : 0f;
         var q = Quaternion.CreateFromAxisAngle(finger.FlexAxes[j], flex);
         if (j == 0)
         {
-            var spread = Spread.TryGetValue(finger.Kind, out var sp) ? sp : 0f;
+            var spread = Spread.TryGetValue(kind, out var sp) ? sp : 0f;
             if (MathF.Abs(spread) > 1e-5f)
                 q = Quaternion.CreateFromAxisAngle(finger.SpreadAxis, spread) * q;
             if (finger.Kind == FingerKind.Thumb && MathF.Abs(ThumbOpposition) > 1e-5f)

@@ -26,12 +26,15 @@ public sealed record CharacterRig
     public Vector3 Forward { get; init; } = Vector3.UnitX;
     public Vector3 Up { get; init; } = Vector3.UnitZ;
 
-    public static CharacterRig? From(Rig.Skeleton skeleton)
+    public static CharacterRig? From(Rig.Skeleton skeleton, bool pinkyFollowsRing = false)
     {
         var right = HandRig.Build(skeleton, Side.Right);
         if (right is null)
             return null;
         var left = HandRig.Build(skeleton, Side.Left);
+        right.PinkyFollowsRing = pinkyFollowsRing;
+        if (left is not null)
+            left.PinkyFollowsRing = pinkyFollowsRing;
         var hold = skeleton.IndexOf("hold_R");
         return new CharacterRig { Right = right, Left = left, HoldBone = hold >= 0 ? hold : right.Hand };
     }
