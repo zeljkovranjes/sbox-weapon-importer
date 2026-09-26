@@ -15,7 +15,7 @@ public static class WeaponClassifier
         (WeaponType.Revolver, new[] { "revolver", "magnum", "python", "colt", "44", "357", "cylinder", "peacemaker", "rhino" }),
         (WeaponType.Pistol, new[] { "pistol", "handgun", "glock", "deagle", "deserteagle", "eagle", "beretta", "m9", "m1911", "1911", "usp", "p250", "p2000", "fiveseven", "sidearm", "sig", "makarov", "tec9", "cz75" }),
         (WeaponType.Smg, new[] { "smg", "uzi", "mp5", "mp7", "mp9", "p90", "vector", "ump", "mac10", "mac", "thompson", "bizon", "submachine", "pdw", "mp40", "ppsh" }),
-        (WeaponType.Shotgun, new[] { "shotgun", "spas", "benelli", "m870", "remington", "nova", "xm1014", "sawedoff", "pump", "doublebarrel", "aa12", "saiga" }),
+        (WeaponType.Shotgun, new[] { "shotgun", "spas", "benelli", "m870", "remington", "nova", "xm1014", "sawedoff", "sawnoff", "sawnoffs", "sawedoffs", "coachgun", "pump", "doublebarrel", "aa12", "saiga" }),
         (WeaponType.Sniper, new[] { "sniper", "awp", "awm", "barrett", "m82", "l96", "scout", "ssg", "m24", "dragunov", "svd", "kar98", "mosin", "boltaction", "marksman", "dmr", "rifle_sniper" }),
         (WeaponType.Launcher, new[] { "rpg", "launcher", "bazooka", "rocket", "grenadelauncher", "m79", "at4", "javelin", "stinger", "law", "panzerfaust" }),
         (WeaponType.Melee, new[] { "knife", "sword", "katana", "axe", "hatchet", "bat", "crowbar", "machete", "blade", "melee", "club", "wrench", "dagger", "bayonet", "spear", "mace", "pipe", "balisong", "butterfly", "mariposa", "karambit", "cleaver", "sickle", "scythe", "hammer", "baton", "nightstick", "shovel", "pickaxe", "halberd", "rapier", "saber", "sabre", "scimitar", "tomahawk" }),

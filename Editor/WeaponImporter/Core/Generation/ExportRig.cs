@@ -49,15 +49,25 @@ public sealed class ExportRig
         foreach (var p in a.Parts)
             if (p.Bone.Length > 0 && skeleton.IndexOf(p.Bone) is var pi && pi >= 0)
                 keep.Add(pi);
+        // The left-hand copy of a dual weapon: its bones keep their own hierarchy under its root.
+        var second = a.SecondWeaponBone is { } secondName ? skeleton.IndexOf(secondName) : -1;
+        if (second >= 0)
+        {
+            keep.Add(second);
+            foreach (var t in a.SecondWeaponTriangles)
+                if (mesh.TriangleBone(t) is var sb && sb >= 0)
+                    keep.Add(sb);
+        }
+        bool Under(int bone) => bone == body || IsDescendant(skeleton, bone, body) || (second >= 0 && (bone == second || IsDescendant(skeleton, bone, second)));
         if (keepNames is not null)
             foreach (var n in keepNames)
                 if (!string.IsNullOrEmpty(n) && skeleton.IndexOf(n) is var ki && ki >= 0 && !a.ArmBones.Contains(ki))
                     keep.Add(ki);
         // Close over ancestors that sit between the body and a kept bone (keeps hierarchies intact).
         foreach (var b in keep.ToList())
-            for (var p = skeleton[b].ParentIndex; p >= 0 && p != body; p = skeleton[p].ParentIndex)
+            for (var p = skeleton[b].ParentIndex; p >= 0 && p != body && p != second; p = skeleton[p].ParentIndex)
             {
-                if (!IsDescendant(skeleton, p, body))
+                if (!Under(p))
                     break;
                 keep.Add(p);
             }
@@ -67,8 +77,10 @@ public sealed class ExportRig
         {
             if (b == body)
                 return -1;
+            if (b == second)
+                return body;
             for (var p = skeleton[b].ParentIndex; p >= 0; p = skeleton[p].ParentIndex)
-                if (keep.Contains(p) && (p == body || IsDescendant(skeleton, p, body)))
+                if (keep.Contains(p) && Under(p))
                     return p;
             return body;
         }
@@ -159,7 +171,7 @@ public sealed class ExportRig
             Clips = clips,
             Attachments = source.Attachments,
         };
-        return new ExportRig { Asset = asset, Triangles = a.WeaponTriangles, RootName = skeleton[body].Name, Map = map };
+        return new ExportRig { Asset = asset, Triangles = a.WeaponTriangles.Concat(a.SecondWeaponTriangles).ToArray(), RootName = skeleton[body].Name, Map = map };
     }
 
     private static bool IsDescendant(Skeleton skeleton, int bone, int ancestor)

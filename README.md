@@ -34,6 +34,18 @@ an `Animations` folder) are picked up, and a pack's shared arms model (for examp
 with `FP_Arms_Pistol_01_Fire.fbx`) is found and the weapon put in its hands. Choose other arms or
 turn them off in the **Arms** row on the **Weapon** page.
 
+## Melee, items, fists and dual weapons
+
+Knives, swords, fists and items (syringes, bottles, flashlights...) import like guns: attacks can
+play several clips in turn, and blocks and held uses have start, loop and end clips. A file with
+two copies of a weapon (`gun_L` / `gun_R`) is set up as dual weapons, one in each hand.
+
+For what the character's animgraph doesn't cover, press **Download stock animations** on the
+**Animations** page (under 1 MB, from this repository's releases). The importer then picks a
+style for the weapon (one- or two-handed melee, polearm, dual blades, fists, dual pistols, drinking,
+injecting, throwing, carrying...) and its character hold and actions. Change the style there, or
+give any action your own sequence from any model with the character's skeleton.
+
 ## From your game code
 
 Actions come from the character's animgraph (`b_attack`, `b_reload`, `b_deploy`) or
@@ -42,6 +54,8 @@ Actions come from the character's animgraph (`b_attack`, `b_reload`, `b_deploy`)
 - `Aiming` while the player aims down the sights
 - `Empty` when the magazine is empty (plays the empty reload / last-round fire if the weapon has them)
 - `ShellsToLoad` before a shell-by-shell reload; `ShellInserted` fires for each shell
+- `Blocking` while the player holds the guard up, `Using` while they keep using an item
+- `Play( "attack2" )`, `Play( "use" )` or `Play( "throw" )` for a heavy attack, a one-off use or a throw
 
 Edited animgraphs and prefabs are kept when you bake again; delete one to have it regenerated.
 
@@ -53,4 +67,5 @@ Third-person animations need the
 ## Credits
 
 Built-in grips come from "FPS AK-74m animations" by Cransh (CC-BY-4.0) and the Uzi first-person
-animations by 1Matzh.
+animations by 1Matzh. The stock animations are retargeted from Human Melee Animations by Kevin
+Iglesias, Item Consumable Animations, Grenade Animation Kit and Insane Gunner Animset.

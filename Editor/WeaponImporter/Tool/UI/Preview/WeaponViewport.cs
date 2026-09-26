@@ -125,6 +125,8 @@ public sealed partial class WeaponViewport : SceneRenderingWidget
 			_holdDirty = true;
 		}
 		_weaponObject.Enabled = !OwnArmsView;
+		// Arms holding nothing (fists): no third-person weapon to show.
+		_weapon.Enabled = !session.Analysis.HandsOnly;
 
 		EnsurePreviewMaterials( session.Analysis );
 		if ( _shownAnalysis != session.Analysis || _shownBaked != _c.BakedModelPath || _shownMaterials != _materials )

@@ -91,6 +91,15 @@ public static class WeaponAnalyzer
         if (sourceTris.Length == 0)
             sourceTris = Enumerable.Range(0, source.Mesh.TriangleCount).ToArray();
         sourceTris = DropSpareMagazines(source, sourceTris, dropped);
+        // Two copies, one per hand: everything below measures the right one.
+        var dual = handsOnly ? null : DualWeapons.Find(source, sourceArms, sourceTris);
+        var secondTris = Array.Empty<int>();
+        if (dual is not null)
+        {
+            var left = dual.LeftTriangles.ToHashSet();
+            secondTris = dual.LeftTriangles;
+            sourceTris = sourceTris.Where(t => !left.Contains(t)).ToArray();
+        }
 
         // 2. Bring it into canonical space: muzzle +X, up +Z, realistic size.
         var sourceBounds = TriangleBounds(source.Mesh, sourceTris);
@@ -100,6 +109,13 @@ public static class WeaponAnalyzer
         var (scale, scaleReason) = options.Scale is { } forced
             ? (forced, "set manually")
             : GuessScale(rotatedLength, WeaponClassifier.FromNames(source));
+        // First-person arms in the file are the better yardstick: a forearm is about ten inches
+        // whatever the weapon (an item's plausible size spans too much to tell the units).
+        if (options.Scale is null && ForearmLength(source.Skeleton, sourceArms) is { } forearm && forearm * scale is < 7f or > 15f)
+        {
+            scale = HumanForearm / forearm;
+            scaleReason = $"sized by its first-person arms (forearm {forearm:0.##} units)";
+        }
         var asset = MathF.Abs(scale - 1f) < 1e-6f && MathF.Abs(rotation.W) > 0.99999f ? source : source.Transformed(rotation, scale);
         origin = Vector3.Transform(origin, rotation) * scale;
 
@@ -135,6 +151,8 @@ public static class WeaponAnalyzer
             HandsOnly = handsOnly,
             SourceOrigin = origin - centre,
             WeaponTriangles = weaponTris,
+            SecondWeaponBone = dual is null ? null : source.Skeleton[dual.Left].Name,
+            SecondWeaponTriangles = secondTris,
             WeaponBounds = bounds,
             Profile = profile,
             Orientation = orientation,
@@ -293,6 +311,52 @@ public static class WeaponAnalyzer
     /// Picks a uniform scale that gives the weapon a believable length. Unit mix-ups (metres
     /// vs centimetres vs inches) are preferred over arbitrary factors.
     /// </summary>
+    /// <summary>A human forearm (elbow to wrist), inches.</summary>
+    public const float HumanForearm = 10.2f;
+
+    /// <summary>
+    /// Elbow-to-wrist length of the file's arms (the longer side), in file units, or null when
+    /// there are no arms with a recognisable hand.
+    /// </summary>
+    public static float? ForearmLength(Skeleton skeleton, IReadOnlySet<int> armBones)
+    {
+        if (armBones.Count == 0)
+            return null;
+        float? best = null;
+        var rest = skeleton.RestWorld;
+        foreach (var side in new[] { Hands.Side.Right, Hands.Side.Left })
+        {
+            if (Hands.HandRig.Build(skeleton, side) is not { } hand || !armBones.Contains(hand.Hand))
+                continue;
+            // The forearm bone starts at the elbow: the farthest of the nearby ancestors named like
+            // one (twist bones and helpers sit along it), else the hand's parent.
+            var elbow = -1;
+            var farthest = 0f;
+            var steps = 0;
+            for (var p = skeleton[hand.Hand].ParentIndex; p >= 0 && steps < 4; p = skeleton[p].ParentIndex, steps++)
+            {
+                var tokens = NameTokens.Split(skeleton[p].Name);
+                var joined = NameTokens.Joined(tokens);
+                if (!NameTokens.Has(tokens, "forearm", "fore", "elbow", "lowerarm") && !joined.Contains("lowerarm") && !joined.Contains("forearm") && !joined.Contains("armlower"))
+                    continue;
+                var d = Vector3.Distance(rest[hand.Hand].Pos, rest[p].Pos);
+                if (d > farthest)
+                {
+                    farthest = d;
+                    elbow = p;
+                }
+            }
+            if (elbow < 0)
+                elbow = skeleton[hand.Hand].ParentIndex;
+            if (elbow < 0)
+                continue;
+            var length = Vector3.Distance(rest[hand.Hand].Pos, rest[elbow].Pos);
+            if (length > 1e-3f && (best is null || length > best))
+                best = length;
+        }
+        return best;
+    }
+
     public static (float Scale, string Reason) GuessScale(float length, WeaponType? nameType)
     {
         if (!(length > 1e-4f))
@@ -1101,6 +1165,15 @@ public static class WeaponAnalyzer
         var skeleton = a.Asset.Skeleton;
         var magBone = mag is null ? -1 : skeleton.IndexOf(mag.Bone);
         var boltBone = bolt is null ? -1 : skeleton.IndexOf(bolt.Bone);
+        var ammo = AmmoBones(a);
+        // Takes split into actions: their parts are used, not the whole take.
+        bool Split(Clip clip) => a.Asset.FindClip(TakeSplitter.PartName(clip.Name, 0)) is not null;
+        // One action of such a take ("Take 001 3" of "Take 001").
+        bool Part(Clip clip)
+        {
+            var space = clip.Name.LastIndexOf(' ');
+            return space > 0 && int.TryParse(clip.Name[(space + 1)..], out _) && a.Asset.FindClip(clip.Name[..space]) is not null;
+        }
 
         foreach (var clip in a.Asset.Clips)
         {
@@ -1114,11 +1187,24 @@ public static class WeaponAnalyzer
             // Parts of a split take carry no telling name: judge them by how the hands move.
             if (clip.Name.EndsWith(" start pose", StringComparison.Ordinal))
                 guess = guess with { Role = AnimationRole.Unknown, Confidence = 0f, Reason = "still first frame of a take" };
+            else if (firearm && Split(clip))
+                guess = guess with { Role = AnimationRole.Unknown, Confidence = 0f, Reason = "holds several actions (its parts are used)" };
+            else if (firearm && Part(clip) && (guess.Role is AnimationRole.Unknown or AnimationRole.Bolt || guess.Confidence < 0.6f))
+            {
+                // A firearm's actions in one nameless take: the rounds coming out and going in
+                // make a reload, a short kick that settles back is a shot.
+                if (clip.Duration >= 0.9f && ammo.Count > 0 && ammo.Max(b => TravelFromWeapon(a, clip, b)) > 1f)
+                    guess = guess with { Role = AnimationRole.Reload, Confidence = 0.5f, Reason = "the rounds come out and go in" };
+                else if (clip.Duration <= 0.8f && !clip.Looping && HandPeakSpeed(a, clip) > 25f && Kick(a, clip) is > 1f and < 10f)
+                    guess = guess with { Role = AnimationRole.Fire, Confidence = 0.45f, Reason = "a short kick that settles back" };
+                else if (clip.Looping)
+                    guess = guess with { Role = AnimationRole.Idle, Confidence = 0.55f, Reason = "the hands rest" };
+            }
             else if (guess.Role == AnimationRole.Unknown || (guess.Role == AnimationRole.Idle && guess.Confidence < 0.6f && !clip.Looping))
             {
                 if (clip.Looping)
                     guess = guess with { Role = AnimationRole.Idle, Confidence = 0.55f, Reason = "the hands rest" };
-                else if (!firearm && clip.Duration < 2.2f && HandPeakSpeed(a, clip) > 60f)
+                else if (a.Type.Type is WeaponType.Melee or WeaponType.Unarmed && clip.Duration < 2.2f && HandPeakSpeed(a, clip) > 60f)
                     guess = guess with { Role = AnimationRole.Fire, Confidence = 0.5f, Reason = "a fast swing of the hands" };
             }
             a.Animations.Add(guess);
@@ -1168,10 +1254,21 @@ public static class WeaponAnalyzer
             a.AssignedAnimations.Remove(AnimationRole.Melee);
             if (a.AssignedAnimations.TryGetValue(AnimationRole.Fire, out var main))
             {
-                var more = attacks.Select(g => g.Animation).Where(n => n != main.Animation).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+                // Packs repeat the same action in several takes: a copy is not another attack.
+                var mainClip = a.Asset.FindClip(main.Animation);
+                var more = attacks.Select(g => g.Animation).Where(n => n != main.Animation).Distinct()
+                    .Where(n => mainClip is null || a.Asset.FindClip(n) is not { } other || !SameMotion(a.Asset.Skeleton, mainClip, other))
+                    .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
                 if (more.Count > 0)
                     a.AnimationVariants[AnimationRole.Fire] = more;
             }
+        }
+        // Several shots in one take (a dual weapon firing each gun): played in turn.
+        if (firearm && a.AssignedAnimations.TryGetValue(AnimationRole.Fire, out var shot) && shot.Reason == "a short kick that settles back")
+        {
+            var more = a.Animations.Where(g => g.Role == AnimationRole.Fire && g.Reason == shot.Reason && g.Animation != shot.Animation).Select(g => g.Animation).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+            if (more.Count > 0)
+                a.AnimationVariants[AnimationRole.Fire] = more;
         }
         if (a.AssignedAnimations.TryGetValue(AnimationRole.Attack2, out var heavy))
         {
@@ -1179,6 +1276,74 @@ public static class WeaponAnalyzer
             if (more.Count > 0)
                 a.AnimationVariants[AnimationRole.Attack2] = more;
         }
+    }
+
+    private static readonly string[] AmmoNames = { "shell", "shells", "slug", "slugs", "round", "rounds", "bullet", "bullets", "cartridge", "cartridges", "casing", "ammo", "mag", "magazine", "clip" };
+
+    /// <summary>Weapon bones that are rounds or a magazine (by name).</summary>
+    private static List<int> AmmoBones(WeaponAnalysis a)
+    {
+        var skeleton = a.Asset.Skeleton;
+        var bones = new List<int>();
+        for (var i = 0; i < skeleton.Count; i++)
+            if (!a.ArmBones.Contains(i) && NameTokens.Has(NameTokens.Split(skeleton[i].Name), AmmoNames))
+                bones.Add(i);
+        return bones;
+    }
+
+    /// <summary>How far a bone moves relative to the weapon root during a clip (inches).</summary>
+    private static float TravelFromWeapon(WeaponAnalysis a, Clip clip, int bone)
+    {
+        var skeleton = a.Asset.Skeleton;
+        var root = a.RootBone >= 0 ? a.RootBone : 0;
+        Vector3? first = null;
+        var max = 0f;
+        foreach (var frame in clip.Frames)
+        {
+            var world = new Pose(frame).ToWorld(skeleton);
+            var local = XForm.ToLocal(world[root], world[bone]).Pos;
+            first ??= local;
+            max = MathF.Max(max, Vector3.Distance(local, first.Value));
+        }
+        return max;
+    }
+
+    /// <summary>
+    /// How far the weapon kicks in a clip (inches): the most either copy's root moves from where
+    /// it starts. A shot kicks a few inches; a draw or a flourish sweeps much further.
+    /// </summary>
+    private static float Kick(WeaponAnalysis a, Clip clip)
+    {
+        var skeleton = a.Asset.Skeleton;
+        var bones = new List<int> { a.RootBone >= 0 ? a.RootBone : 0 };
+        if (a.SecondWeaponBone is { } second && skeleton.IndexOf(second) is var s and >= 0)
+            bones.Add(s);
+        var start = new Pose(clip.Frames[0]).ToWorld(skeleton);
+        var kick = 0f;
+        foreach (var frame in clip.Frames)
+        {
+            var world = new Pose(frame).ToWorld(skeleton);
+            foreach (var b in bones)
+                kick = MathF.Max(kick, Vector3.Distance(world[b].Pos, start[b].Pos));
+        }
+        return kick;
+    }
+
+    /// <summary>Two clips play the same motion (the same take copied under another name).</summary>
+    private static bool SameMotion(Skeleton skeleton, Clip x, Clip y)
+    {
+        if (Math.Abs(x.FrameCount - y.FrameCount) > 1)
+            return false;
+        var n = Math.Min(x.FrameCount, y.FrameCount);
+        for (var f = 0; f < n; f += Math.Max(1, n / 8))
+        {
+            var wx = new Pose(x.Frames[f]).ToWorld(skeleton);
+            var wy = new Pose(y.Frames[f]).ToWorld(skeleton);
+            for (var b = 0; b < skeleton.Count; b++)
+                if (Vector3.Distance(wx[b].Pos, wy[b].Pos) > 0.25f)
+                    return false;
+        }
+        return true;
     }
 
     /// <summary>Fastest any arm bone (else any bone) moves during a clip, inches per second.</summary>

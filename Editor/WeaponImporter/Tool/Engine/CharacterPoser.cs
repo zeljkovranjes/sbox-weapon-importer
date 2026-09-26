@@ -152,6 +152,16 @@ public sealed class CharacterPoser : IDisposable
                 return (frame.PointToLocal( root.PointToLocal( l.Position ) ), frame.PointToLocal( root.PointToLocal( r.Position ) ));
             }
             var idle = Hands();
+            // A lively idle (a boxing bounce) moves the hands by itself: that much is not the action.
+            var sway = 0f;
+            for ( var i = 0; i < 60; i++ )
+            {
+                clock += step;
+                _scene.EditorTick( clock, step );
+                var (l, r) = Hands();
+                sway = MathF.Max( sway, MathF.Max( (l - idle.L).Length, (r - idle.R).Length ) );
+            }
+            var threshold = MathF.Max( 1.0f, sway * 1.5f + 0.5f );
             _body.Set( trigger, true );
             var last = 0f;
             var moved = false;
@@ -161,7 +171,7 @@ public sealed class CharacterPoser : IDisposable
                 _scene.EditorTick( clock, step );
                 var (l, r) = Hands();
                 var deviation = MathF.Max( (l - idle.L).Length, (r - idle.R).Length );
-                if ( deviation > 1.0f )
+                if ( deviation > threshold )
                 {
                     last = now;
                     moved = true;
@@ -177,6 +187,40 @@ public sealed class CharacterPoser : IDisposable
 
     /// <summary>Settles a weapon type's default hold.</summary>
     public CharacterPose Sample( WeaponType type ) => Sample( WeaponTypes.HoldType( type ) );
+
+    /// <summary>
+    /// The hold with a hold pose over the upper body (<paramref name="poseSequence"/> of
+    /// <paramref name="poseModel"/> at <paramref name="time"/>), as Weapon Hold plays it in game.
+    /// Without a pose, the plain hold.
+    /// </summary>
+    public CharacterPose Sample( int holdType, string poseModel, string poseSequence, float time = 0f )
+    {
+        var pose = Sample( holdType );
+        if ( string.IsNullOrEmpty( poseSequence ) )
+            return pose;
+        var model = Model.Load( string.IsNullOrEmpty( poseModel ) ? _body.Model.ResourcePath : poseModel );
+        if ( model is null || model.IsError || !model.AnimationNames.Contains( poseSequence ) )
+            return pose;
+        using ( _scene.Push() )
+        {
+            var overlay = new SceneModel( _body.SceneModel.World, model, _body.SceneModel.Transform ) { UseAnimGraph = false, RenderingEnabled = false };
+            try
+            {
+                overlay.CurrentSequence.Name = poseSequence;
+                overlay.CurrentSequence.Time = time;
+                overlay.Update( 0f );
+                var root = _body.WorldTransform;
+                var world = new Dictionary<string, WeaponImporter.Core.Maths.XForm>( StringComparer.Ordinal );
+                for ( var i = 0; i < model.BoneCount; i++ )
+                    world[model.GetBoneName( i )] = root.ToLocal( overlay.GetBoneWorldTransform( i ) ).ToCore();
+                return pose.WithUpperBody( world );
+            }
+            finally
+            {
+                overlay.Delete();
+            }
+        }
+    }
 
     /// <summary>Animgraph parameters for holding with <paramref name="holdType"/> (the citizen holdtype enum), aiming forward.</summary>
     public static void ApplyParameters( SkinnedModelRenderer body, int holdType )

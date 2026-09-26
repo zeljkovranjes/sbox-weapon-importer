@@ -147,7 +147,7 @@ public sealed class ImportSession : IDisposable
         var analysis = await AnalyzeAsync( Asset, options, cancel );
 
         Report( progress, "Configuring setup" );
-        Setup = AutoSetup.Build( analysis, previous );
+        Setup = AutoSetup.Build( analysis, previous, StockAnimations.Sequences );
         Setup.Source = path;
         Setup.SourceHash = Hash( path );
         Notify();
@@ -214,7 +214,7 @@ public sealed class ImportSession : IDisposable
         _analyzeOptions = options;
         Asset = WithTextures( SourceAsset, Setup );
         var analysis = await AnalyzeAsync( Asset, options, cancel );
-        Setup = AutoSetup.Build( analysis, Setup );
+        Setup = AutoSetup.Build( analysis, Setup, StockAnimations.Sequences );
         Notify();
         await ResolveGripAsync( progress, cancel );
     }
@@ -269,11 +269,40 @@ public sealed class ImportSession : IDisposable
     public Task ApplyTextureChoicesAsync( IProgress<string> progress = null, CancellationToken cancel = default )
         => ReanalyzeAsync( _analyzeOptions, progress, cancel );
 
+    /// <summary>
+    /// Sets how the character holds and uses the weapon with the stock third-person animations
+    /// (or the character's animgraph for <see cref="StockStyle.None"/>), then refits the grip to
+    /// the new hold.
+    /// </summary>
+    public async Task SetStockStyleAsync( StockStyle style, bool manual, IProgress<string> progress = null, CancellationToken cancel = default )
+    {
+        Setup.StockStyle = style;
+        Setup.StockStyleManual = manual;
+        StockThirdPerson.Apply( Setup, style, StockAnimations.Sequences );
+        if ( _poser is not null )
+            ReferencePose = HoldPose();
+        Notify();
+        await ResolveGripAsync( progress, cancel );
+    }
+
+    /// <summary>Refits the grip after the hold pose (the idle third-person animation) changed.</summary>
+    public async Task RefitHoldAsync( IProgress<string> progress = null, CancellationToken cancel = default )
+    {
+        if ( _poser is not null )
+            ReferencePose = HoldPose();
+        Notify();
+        await ResolveGripAsync( progress, cancel );
+    }
+
+    /// <summary>After the stock animations are installed: the weapon's suggested style.</summary>
+    public Task ApplyStockAsync( IProgress<string> progress = null, CancellationToken cancel = default )
+        => SetStockStyleAsync( Setup.StockStyle, Setup.StockStyleManual, progress, cancel );
+
     /// <summary>Runs the one-click setup again from scratch (manual choices are cleared).</summary>
     public async Task AutoSetupAsync( IProgress<string> progress = null, CancellationToken cancel = default )
     {
         var fresh = new WeaponSetup { Name = Setup?.Name ?? Asset.Name, Source = SourcePath, Character = Setup?.Character ?? "human", OutputFolder = Setup?.OutputFolder ?? "" };
-        Setup = AutoSetup.Build( Analysis, fresh );
+        Setup = AutoSetup.Build( Analysis, fresh, StockAnimations.Sequences );
         Notify();
         await PrepareCharacterAsync( progress, cancel );
         await ResolveGripAsync( progress, cancel );
@@ -310,11 +339,23 @@ public sealed class ImportSession : IDisposable
         // keeps the editor responsive (the first import pays for loading the graph).
         await EditorThread.NextFrame( cancel );
         await ChooseHoldAsync( progress, cancel );
-        ReferencePose = _poser.Sample( Setup.EffectiveHoldType );
+        ReferencePose = HoldPose();
         await MeasureActionsAsync( cancel );
         await WarmActionPosesAsync( cancel );
         await SampleActionTracksAsync( cancel );
         Notify();
+    }
+
+    /// <summary>
+    /// The character holding the weapon: its animgraph hold, with the hold pose (the idle
+    /// third-person animation, e.g. a stock stance) over the upper body when there is one, as
+    /// Weapon Hold plays it in game.
+    /// </summary>
+    private CharacterPose HoldPose()
+    {
+        if ( Setup.ThirdPerson.TryGetValue( AnimationRole.Idle, out var hold ) && hold.Source == CharacterAnimationSource.Sequence && !string.IsNullOrEmpty( hold.Sequence ) )
+            return _poser.Sample( Setup.EffectiveHoldType, hold.Model, hold.Sequence );
+        return _poser.Sample( Setup.EffectiveHoldType );
     }
 
     /// <summary>Every hold animation tried for this weapon with its fit (best first).</summary>
@@ -696,7 +737,55 @@ public sealed class ImportSession : IDisposable
         Fingers( Character.Right, s.Right, baked.RightFingers );
         if ( s.Left is not null && Character.Left is not null )
             Fingers( Character.Left, s.Left, baked.LeftFingers );
+        if ( Setup.Dual && s.Left is null && Analysis is { SecondWeaponBone: { } second } && Character.Left is not null )
+            BakeSecondWeapon( baked, s, second, weaponWorld );
         return baked.SettledOn( _settledGrip );
+    }
+
+    /// <summary>
+    /// Dual weapons: the left-hand copy sits in the left hand as the right one sits in the right
+    /// (its frame mirrored across the character's middle), held by the left hold bone; the left
+    /// fingers take the right hand's grasp.
+    /// </summary>
+    private void BakeSecondWeapon( BakedGrip baked, GripSolution s, string second, XForm weaponWorld )
+    {
+        var skeleton = Analysis.Asset.Skeleton;
+        var bone = skeleton.IndexOf( second );
+        var character = Character.Right.Skeleton;
+        var holdL = character.IndexOf( "hold_L" ) is var h and >= 0 ? h : Character.Left.Hand;
+        if ( bone < 0 || Analysis.SecondWeaponTriangles.Length == 0 )
+            return;
+        // The frame on the left copy that matches the right copy's canonical frame: at its centre,
+        // pointing the same way (the copies are held side by side in the source).
+        var mesh = Analysis.Asset.Mesh;
+        var centre = N.Vector3.Zero;
+        var count = 0;
+        foreach ( var t in Analysis.SecondWeaponTriangles )
+            for ( var k = 0; k < 3; k++ )
+            {
+                centre += mesh.Positions[mesh.Indices[t * 3 + k]];
+                count++;
+            }
+        centre /= Math.Max( 1, count );
+        var frameInBone = XForm.ToLocal( skeleton.RestWorld[bone], new XForm( centre, N.Quaternion.Identity ) );
+        // The left copy sits in the left hand as the right one sits in the right hand: the grip
+        // relative to the hand, mirrored the way this rig mirrors its left bones (the stance
+        // itself needn't be symmetric).
+        var signs = DualWeapons.MirrorSigns( character );
+        var handR = Character.Right.Hand;
+        var handL = Character.Left.Hand;
+        var inHand = XForm.ToLocal( s.Posed.World[handR], weaponWorld );
+        var flip = new N.Vector3( signs.X > 0 ? -1 : 1, signs.Y > 0 ? -1 : 1, signs.Z > 0 ? -1 : 1 );
+        var mirroredInHand = new XForm( inHand.Pos * flip, DualWeapons.Mirror( inHand.Rot, signs ) );
+        var boneWorld = XForm.Compose( XForm.Compose( s.Posed.World[handL], mirroredInHand ), frameInBone.Inverse() );
+        // The weapon model is canonical space: the bone's model transform is its canonical rest.
+        baked.SecondWeaponBone = second;
+        baked.SecondHoldBone = character[holdL].Name;
+        baked.SecondInHold = V.A( XForm.ToLocal( s.Posed.World[holdL], boneWorld ) );
+        // The left hand closes around its copy as the right one does, mirrored for the rig.
+        foreach ( var (name, rotation) in baked.RightFingers )
+            if ( name.EndsWith( "_R", StringComparison.Ordinal ) && rotation is { Length: 4 } )
+                baked.LeftFingers[name[..^2] + "_L"] = V.A( DualWeapons.Mirror( new N.Quaternion( rotation[0], rotation[1], rotation[2], rotation[3] ), signs ) );
     }
 
     // ------------------------------------------------------------------ edits

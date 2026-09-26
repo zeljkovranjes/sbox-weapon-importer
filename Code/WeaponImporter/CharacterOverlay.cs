@@ -11,6 +11,8 @@ public sealed class OverlayInfo
     public string Sequence;
     /// <summary>Fade in/out time in seconds.</summary>
     public float Blend = 0.2f;
+    /// <summary>More sequences of the same model played in turn with <see cref="Sequence"/> (attack combos).</summary>
+    public List<string> Variants = new();
 }
 
 /// <summary>
@@ -29,13 +31,25 @@ internal sealed class CharacterOverlay
     public float Weight { get; private set; }
     public float Duration { get; private set; }
 
+    /// <summary>
+    /// Bone the overlay is attached at: its upper body is moved so this bone stays where the
+    /// character's own animation has it (a lunge or a crouch in the sequence bends the upper
+    /// body without pulling it off the hips the animgraph keeps).
+    /// </summary>
+    public const string AnchorBone = "spine_0";
+
+    private Vector3 _offset;
+
     /// <summary>Starts the overlay; returns false when the model or sequence is unusable.</summary>
-    public bool Begin( SkinnedModelRenderer body, OverlayInfo info, out string error )
+    public bool Begin( SkinnedModelRenderer body, OverlayInfo info, out string error ) => Begin( body, info, info?.Sequence, out error );
+
+    /// <summary>Starts the overlay with one of the info's sequences (its own or a variant).</summary>
+    public bool Begin( SkinnedModelRenderer body, OverlayInfo info, string sequence, out string error )
     {
         error = null;
         Active = false;
         Weight = 0f;
-        if ( info == null || string.IsNullOrEmpty( info.Sequence ) || body?.SceneModel == null )
+        if ( info == null || string.IsNullOrEmpty( sequence ) || body?.SceneModel == null )
             return false;
 
         var model = string.IsNullOrEmpty( info.Model ) ? body.Model : Sandbox.Model.Load( info.Model );
@@ -44,9 +58,9 @@ internal sealed class CharacterOverlay
             error = $"model '{info.Model}' could not be loaded";
             return false;
         }
-        if ( !model.AnimationNames.Contains( info.Sequence ) )
+        if ( !model.AnimationNames.Contains( sequence ) )
         {
-            error = $"model '{model.Name}' has no sequence '{info.Sequence}'";
+            error = $"model '{model.Name}' has no sequence '{sequence}'";
             return false;
         }
 
@@ -64,7 +78,7 @@ internal sealed class CharacterOverlay
                 _boneIndex[model.GetBoneName( i )] = i;
         }
 
-        _sequence = info.Sequence;
+        _sequence = sequence;
         _model.CurrentSequence.Name = _sequence;
         _model.Update( 0f );
         Duration = _model.CurrentSequence.Duration;
@@ -82,6 +96,10 @@ internal sealed class CharacterOverlay
         _model.CurrentSequence.Time = Math.Clamp( seconds, 0f, MathF.Max( 0f, Duration ) );
         _model.Update( 0f );
         Weight = Math.Clamp( weight, 0f, 1f );
+        _offset = Vector3.Zero;
+        var anchor = body.Model?.Bones.GetBone( AnchorBone );
+        if ( anchor != null && _boneIndex.TryGetValue( AnchorBone, out var index ) && body.TryGetBoneTransformAnimation( anchor, out var own ) )
+            _offset = own.Position - _model.GetBoneWorldTransform( index ).Position;
     }
 
     /// <summary>World transform of a bone in the overlay pose.</summary>
@@ -91,6 +109,7 @@ internal sealed class CharacterOverlay
         if ( !Active || _model == null || !_boneIndex.TryGetValue( bone, out var index ) )
             return false;
         world = _model.GetBoneWorldTransform( index );
+        world.Position += _offset;
         return true;
     }
 
@@ -109,7 +128,7 @@ internal sealed class CharacterOverlay
         Active = false;
     }
 
-    /// <summary>Parses <c>{"reload":{"model":"","sequence":"reload_rifle","blend":0.2}}</c>.</summary>
+    /// <summary>Parses <c>{"reload":{"model":"","sequence":"reload_rifle","blend":0.2,"variants":["reload_2"]}}</c>.</summary>
     public static bool TryParse( string json, Dictionary<string, OverlayInfo> into, out string error )
     {
         into.Clear();
@@ -135,6 +154,10 @@ internal sealed class CharacterOverlay
                     info.Sequence = s.GetString();
                 if ( entry.Value.TryGetProperty( "blend", out var b ) && b.ValueKind == JsonValueKind.Number )
                     info.Blend = MathF.Max( 0f, b.GetSingle() );
+                if ( entry.Value.TryGetProperty( "variants", out var v ) && v.ValueKind == JsonValueKind.Array )
+                    foreach ( var item in v.EnumerateArray() )
+                        if ( item.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty( item.GetString() ) )
+                            info.Variants.Add( item.GetString() );
                 if ( !string.IsNullOrEmpty( info.Sequence ) )
                     into[info.Role] = info;
             }

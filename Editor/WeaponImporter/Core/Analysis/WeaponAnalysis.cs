@@ -83,6 +83,14 @@ public sealed class WeaponAnalysis
     /// <summary>The file is first-person arms holding nothing (fists, bare hands).</summary>
     public bool HandsOnly { get; init; }
     public required int[] WeaponTriangles { get; init; }
+
+    /// <summary>
+    /// A second copy of the weapon for the left hand (dual pistols): its root bone and triangles.
+    /// <see cref="WeaponTriangles"/> and everything measured from them are the right-hand copy.
+    /// </summary>
+    public string? SecondWeaponBone { get; init; }
+    public int[] SecondWeaponTriangles { get; init; } = Array.Empty<int>();
+    public bool Dual => SecondWeaponBone is not null;
     public required Bounds WeaponBounds { get; init; }
     public required ShapeProfile Profile { get; init; }
     public required OrientationGuess Orientation { get; init; }

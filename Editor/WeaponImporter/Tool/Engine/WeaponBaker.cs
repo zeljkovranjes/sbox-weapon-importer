@@ -374,6 +374,9 @@ public static partial class WeaponBaker
             ["SecondaryElbowHint"] = S( "LeftElbowHint" ),
             ["TwoHanded"] = setup.UseSupportHand,
             ["WeaponOffset"] = S( "WeaponInHold" ),
+            ["SecondWeaponBone"] = S( "SecondWeaponBone" ),
+            ["SecondHoldBone"] = S( "SecondHoldBone" ),
+            ["SecondWeaponOffset"] = S( "SecondInHold" ),
             ["HoldBone"] = S( "HoldBone" ),
             ["Contacts"] = S( "Contacts" ),
             ["Actions"] = S( "Actions" ),
@@ -396,7 +399,11 @@ public static partial class WeaponBaker
         values["Profile"] = profilePath;
         var hold = new PrefabComponent( "WeaponImporter.WeaponHold", values );
         var root = new PrefabObject { Name = setup.Name, Tags = "weapon" };
-        root.Components.Add( PrefabBuilder.ModelRenderer( modelPath ) );
+        var renderer = PrefabBuilder.ModelRenderer( modelPath );
+        // Arms holding nothing (fists): nothing to show in third person, the hold still poses the character.
+        if ( session.Analysis?.HandsOnly == true )
+            renderer = renderer with { Properties = new Dictionary<string, JsonNode>( renderer.Properties ) { ["__enabled"] = false } };
+        root.Components.Add( renderer );
         root.Components.Add( hold );
         if ( !string.IsNullOrEmpty( firstPersonModel ) && firstPerson is not null )
         {
@@ -465,11 +472,12 @@ public static partial class WeaponBaker
         foreach ( var role in AnimationRoles.All.Prepend( AnimationRole.Idle ).Distinct() )
         {
             sequenceByRole.TryGetValue( role, out var seq );
-            var seconds = ActionTiming.Seconds( setup, session.Analysis?.Asset, role );
+            var seconds = ActionTiming.BakedSeconds( setup, session.Analysis?.Asset, role );
             var trigger = AnimationRoles.GraphTrigger( role ) ?? "";
             if ( seq is null && trigger.Length == 0 && role != AnimationRole.Idle && !setup.Contacts.ContainsKey( role ) )
                 continue;
-            var action = new JsonObject { ["seconds"] = Math.Round( MathF.Max( seconds, 0.05f ), 3 ), ["sequence"] = seq ?? "", ["trigger"] = role == AnimationRole.Idle ? "" : trigger };
+            // 0 seconds: the character's replacement animation decides how long the action lasts.
+            var action = new JsonObject { ["seconds"] = seconds <= 0f ? 0 : Math.Round( MathF.Max( seconds, 0.05f ), 3 ), ["sequence"] = seq ?? "", ["trigger"] = role == AnimationRole.Idle ? "" : trigger };
             if ( seq is not null && VariantSequences( setup, role ) is { Count: > 0 } variants )
                 action["variants"] = new JsonArray( variants.Select( v => (JsonNode)v ).ToArray() );
             actions[role.ToString().ToLowerInvariant()] = action;
@@ -479,7 +487,12 @@ public static partial class WeaponBaker
         var characterActions = new JsonObject();
         foreach ( var (role, tp) in setup.ThirdPerson )
             if ( tp.Source == CharacterAnimationSource.Sequence && !string.IsNullOrEmpty( tp.Sequence ) )
-                characterActions[role.ToString().ToLowerInvariant()] = new JsonObject { ["model"] = tp.Model ?? "", ["sequence"] = tp.Sequence, ["blend"] = 0.2 };
+            {
+                var entry = new JsonObject { ["model"] = tp.Model ?? "", ["sequence"] = tp.Sequence, ["blend"] = 0.2 };
+                if ( tp.Variants is { Count: > 0 } variants )
+                    entry["variants"] = new JsonArray( variants.Select( v => (JsonNode)v ).ToArray() );
+                characterActions[role.ToString().ToLowerInvariant()] = entry;
+            }
         // The baked corrected clips, when chosen, for actions the user didn't give their own animation.
         if ( setup.UseCorrectedAnimations && !string.IsNullOrEmpty( setup.CorrectedModel ) )
             foreach ( var (role, sequence) in setup.CorrectedClips )
@@ -507,6 +520,9 @@ public static partial class WeaponBaker
             ["SupportHand"] = setup.UseSupportHand,
             ["RightElbowHint"] = Vec( baked.RightElbow ),
             ["LeftElbowHint"] = setup.UseSupportHand ? Vec( baked.LeftElbow ) : "0,0,0",
+            ["SecondWeaponBone"] = setup.Dual && !string.IsNullOrEmpty( baked.SecondWeaponBone ) ? EngineNames.Bone( baked.SecondWeaponBone ) : "",
+            ["SecondHoldBone"] = setup.Dual && !string.IsNullOrEmpty( baked.SecondWeaponBone ) ? baked.SecondHoldBone : "",
+            ["SecondInHold"] = setup.Dual && !string.IsNullOrEmpty( baked.SecondWeaponBone ) ? Tx( baked.SecondInHold ) : "",
         };
     }
 
@@ -530,6 +546,9 @@ public static partial class WeaponBaker
         hold.SupportHand = v["SupportHand"]!.GetValue<bool>();
         hold.RightElbowHint = Vector3.Parse( S( "RightElbowHint" ) );
         hold.LeftElbowHint = Vector3.Parse( S( "LeftElbowHint" ) );
+        hold.SecondWeaponBone = S( "SecondWeaponBone" );
+        hold.SecondHoldBone = S( "SecondHoldBone" );
+        hold.SecondInHold = S( "SecondInHold" );
     }
 }
 

@@ -18,6 +18,12 @@ public sealed class WeaponHold : Component
     private const string ReloadStartRole = "reloadstart";
     private const string InsertRole = "reloadinsert";
     private const string ReloadEndRole = "reloadend";
+    private const string BlockStartRole = "blockstart";
+    private const string BlockRole = "block";
+    private const string BlockEndRole = "blockend";
+    private const string UseStartRole = "usestart";
+    private const string UseLoopRole = "useloop";
+    private const string UseEndRole = "useend";
     private const float DefaultActionSeconds = 1f;
     private const float ReachGateSeconds = 0.35f;
     private const float ReachFadeDistance = 6f;
@@ -63,6 +69,19 @@ public sealed class WeaponHold : Component
     /// <summary>Weapon model transform relative to the hold bone, "px,py,pz,qx,qy,qz,qw".</summary>
     [Property] public string WeaponInHold { get; set; }
 
+    /// <summary>
+    /// Dual weapons: the weapon model's bone of the left-hand copy ("" = a single weapon). It
+    /// follows <see cref="SecondHoldBone"/> by <see cref="SecondInHold"/>, and the left arm keeps
+    /// its animation with the fingers closed around it.
+    /// </summary>
+    [Property, Group( "Dual" )] public string SecondWeaponBone { get; set; }
+
+    /// <summary>Character bone the left-hand copy is held by.</summary>
+    [Property, Group( "Dual" )] public string SecondHoldBone { get; set; } = "hold_L";
+
+    /// <summary>The left-hand copy's bone relative to <see cref="SecondHoldBone"/>, "px,py,pz,qx,qy,qz,qw".</summary>
+    [Property, Group( "Dual" )] public string SecondInHold { get; set; }
+
     /// <summary>hand_R bone transform in weapon-model space (7 floats).</summary>
     [Property] public string RightHand { get; set; }
 
@@ -85,6 +104,9 @@ public sealed class WeaponHold : Component
     /// Replacement character animations per action (JSON, role keys lowercase):
     /// <c>{"reload":{"model":"","sequence":"reload_rifle","blend":0.2}}</c>. The sequence plays over
     /// the upper body while the animgraph keeps the legs; "" model = the character's own model.
+    /// An <c>idle</c> entry is the hold itself: it loops over the upper body the whole time the
+    /// weapon is held (a two-handed or polearm stance, dual pistols, carrying an item), and
+    /// actions blend over it.
     /// </summary>
     [Property] public string CharacterActions { get; set; }
 
@@ -135,15 +157,16 @@ public sealed class WeaponHold : Component
     [Property] public bool Empty { get; set; }
 
     /// <summary>
-    /// The player holds the guard up (melee weapons, fists). Set it from your input; the
-    /// first-person viewmodel raises, holds and lowers the guard through its animgraph (b_block).
+    /// The player holds the guard up (melee weapons, fists). Set it from your input: the
+    /// character raises the guard, holds it while this stays on and lowers it after (block start,
+    /// block, block end), and the first-person viewmodel does the same through its animgraph (b_block).
     /// </summary>
     [Property] public bool Blocking { get; set; }
 
     /// <summary>
-    /// The player keeps using the item (held use: drinking, healing). Set it from your input; the
-    /// viewmodel plays the start, loops while it stays on and plays the end (b_use). For a one-off
-    /// use call <c>Play( "use" )</c> instead.
+    /// The player keeps using the item (held use: drinking, healing). Set it from your input: the
+    /// character and the viewmodel (b_use) play the start, loop while it stays on and play the end.
+    /// For a one-off use call <c>Play( "use" )</c> instead.
     /// </summary>
     [Property] public bool Using { get; set; }
 
@@ -220,6 +243,9 @@ public sealed class WeaponHold : Component
     private string _srcWeaponInHold, _srcRightHand, _srcLeftHand, _srcRightFingers, _srcLeftFingers, _srcContacts, _srcActions, _srcCharacterActions;
     private readonly Dictionary<string, OverlayInfo> _overlays = new( StringComparer.OrdinalIgnoreCase );
     private readonly CharacterOverlay _overlay = new();
+    private readonly CharacterOverlay _hold = new();
+    private OverlayInfo _holdInfo;
+    private float _holdTime;
     private OverlayInfo _activeOverlay;
     private readonly List<BoneCollection.Bone> _upperBones = new();
 
@@ -368,6 +394,7 @@ public sealed class WeaponHold : Component
     {
         ClearOverrides();
         _overlay.Dispose();
+        _hold.Dispose();
     }
 
     private void Tick()
@@ -415,12 +442,14 @@ public sealed class WeaponHold : Component
 
         if ( !_paused )
         {
+            UpdateHeldActions( weapon );
             PollTriggers( body, weapon );
             if ( advance )
                 AdvanceTime( dt, weapon );
         }
 
         var bodyTx = body.WorldTransform;
+        UpdateHold( body, advance && !_paused ? dt : 0f );
         UpdateOverlay( body );
         if ( !TryGetAnim( body, _holdBone, out var holdWorld ) )
             return;
@@ -438,6 +467,7 @@ public sealed class WeaponHold : Component
         {
             _weaponWorldAtRead = weapon.WorldTransform;
             weapon.WorldTransform = bodyTx.ToWorld( weaponModel );
+            PlaceSecondWeapon( body, weapon );
         }
 
         var sceneModel = body.SceneModel;
@@ -459,7 +489,7 @@ public sealed class WeaponHold : Component
 
         // Replacement animation over the upper body (spine, neck, head, clavicles); the arms are
         // written below from the same blended pose.
-        if ( _overlay.Active && _overlay.Weight > 1e-4f )
+        if ( OverlayWeight > 1e-4f )
         {
             foreach ( var bone in _upperBones )
                 if ( TryGetAnim( body, bone, out var w ) )
@@ -488,7 +518,15 @@ public sealed class WeaponHold : Component
         // Left hand: contact track, reach release, smoothing.
         LeftShortfall = 0f;
         LeftWeight = 0f;
-        if ( _leftChain != null && _hasLeftHand )
+        if ( _leftChain != null && Dual )
+        {
+            // Dual weapons: the left arm keeps its animation (its copy follows the hand), with
+            // the fingers closed around the grip.
+            _leftChain.ReadAnimation( this, body, bodyTx, clean );
+            _leftChain.Now = now;
+            _leftChain.Write( sceneModel, 0f, 1f );
+        }
+        else if ( _leftChain != null && _hasLeftHand )
         {
             _leftChain.ReadAnimation( this, body, bodyTx, clean );
             _leftChain.Now = now;
@@ -517,8 +555,15 @@ public sealed class WeaponHold : Component
             // hand with its own IK rule, so a corrected right arm would drag the free left arm
             // along and it would snap back when the rule ends. Writing its animation pose keeps
             // the released arm exactly on its own animation.
-            if ( weight > 1e-4f || RightWeight > 1e-4f )
+            if ( weight > 1e-4f || RightWeight > 1e-4f || OverlayWeight > 1e-4f )
                 _leftChain.Write( sceneModel, weight );
+        }
+        else if ( _leftChain != null && OverlayWeight > 1e-4f )
+        {
+            // One-handed: the free arm plays the hold pose / replacement animation.
+            _leftChain.ReadAnimation( this, body, bodyTx, clean );
+            _leftChain.Now = now;
+            _leftChain.Write( sceneModel, 0f, 0f );
         }
 
         // Overrides only take effect when the skeleton is evaluated; the animation update has
@@ -526,7 +571,7 @@ public sealed class WeaponHold : Component
         // evaluation bends the spine differently, so the posture chain keeps this frame's pose.
         if ( sceneModel.HasBoneOverrides() )
         {
-            if ( !(_overlay.Active && _overlay.Weight > 1e-4f) )
+            if ( OverlayWeight <= 1e-4f )
                 foreach ( var bone in _postureBones )
                     if ( TryGetAnim( body, bone, out var w ) )
                         sceneModel.SetBoneOverride( bone.Index, bodyTx.ToLocal( w ) );
@@ -544,6 +589,12 @@ public sealed class WeaponHold : Component
     {
         if ( !body.TryGetBoneTransformAnimation( bone, out world ) )
             return false;
+        // The hold pose first, then the action's replacement animation over it.
+        if ( _hold.Active && _hold.Weight > 1e-4f && _upperSet.Contains( bone.Index ) && _hold.TryGetWorld( bone.Name, out var held ) )
+        {
+            var h = _hold.Weight;
+            world = new Transform( Vector3.Lerp( world.Position, held.Position, h ), ArmSolver.Slerp( world.Rotation, held.Rotation, h ), world.Scale );
+        }
         if ( _overlay.Active && _overlay.Weight > 1e-4f && _upperSet.Contains( bone.Index ) && _overlay.TryGetWorld( bone.Name, out var overlay ) )
         {
             var w = _overlay.Weight;
@@ -554,18 +605,110 @@ public sealed class WeaponHold : Component
 
     private readonly HashSet<int> _upperSet = new();
 
+    private string _srcSecondInHold;
+    private Transform _secondInHold = global::Transform.Zero;
+    private bool _hasSecondInHold;
+
+    /// <summary>Whether this is a dual weapon with a placed left-hand copy.</summary>
+    private bool Dual
+    {
+        get
+        {
+            if ( _srcSecondInHold != SecondInHold )
+            {
+                _srcSecondInHold = SecondInHold;
+                _hasSecondInHold = !string.IsNullOrWhiteSpace( SecondInHold ) && ParseTransformProperty( SecondInHold, nameof( SecondInHold ), out _secondInHold );
+            }
+            return _hasSecondInHold && !string.IsNullOrWhiteSpace( SecondWeaponBone );
+        }
+    }
+
+    /// <summary>Dual weapons: puts the left-hand copy in the left hand (a bone override on the weapon).</summary>
+    private void PlaceSecondWeapon( SkinnedModelRenderer body, SkinnedModelRenderer weapon )
+    {
+        if ( !Dual || weapon.Model == null || weapon.SceneModel == null )
+            return;
+        var bone = weapon.Model.Bones.GetBone( SecondWeaponBone );
+        var hold = body.Model.Bones.GetBone( string.IsNullOrEmpty( SecondHoldBone ) ? "hold_L" : SecondHoldBone ) ?? body.Model.Bones.GetBone( "hand_L" );
+        if ( bone == null || hold == null )
+        {
+            WarnOnce( $"second:{weapon.Model.Name}:{SecondWeaponBone}", $"Weapon Hold: dual weapon bone '{SecondWeaponBone}' or hold bone '{SecondHoldBone}' not found." );
+            return;
+        }
+        if ( !TryGetAnim( body, hold, out var holdWorld ) )
+            return;
+        var world = holdWorld.WithScale( 1f ).ToWorld( _secondInHold );
+        weapon.SceneModel.SetBoneOverride( bone.Index, weapon.WorldTransform.WithScale( 1f ).ToLocal( world ) );
+        weapon.SceneModel.Update( 0f );
+    }
+    private bool _overlayChained;
+
+    /// <summary>Slowest / fastest a replacement animation plays to fit its action.</summary>
+    private const float MinOverlayRate = 0.6f, MaxOverlayRate = 1.6f;
+
+    /// <summary>Whether this part hands over to another part that has a character animation too.</summary>
+    private bool ContinuesInto( string role ) => role switch
+    {
+        BlockStartRole => _overlays.ContainsKey( Blocking && HasAction( BlockRole ) ? BlockRole : BlockEndRole ),
+        UseStartRole => _overlays.ContainsKey( Using && HasAction( UseLoopRole ) ? UseLoopRole : UseEndRole ),
+        _ => false,
+    };
+
+    private readonly Dictionary<string, int> _nextOverlayVariant = new( StringComparer.OrdinalIgnoreCase );
+
+    /// <summary>How much of the upper body a hold pose or replacement animation drives right now.</summary>
+    private float OverlayWeight => MathF.Max( _overlay.Active ? _overlay.Weight : 0f, _hold.Active ? _hold.Weight : 0f );
+
+    /// <summary>Loops the hold pose (the <c>idle</c> character action) while the weapon is held.</summary>
+    private void UpdateHold( SkinnedModelRenderer body, float dt )
+    {
+        if ( _holdInfo == null || !body.IsValid() )
+        {
+            _hold.End();
+            return;
+        }
+        if ( !_hold.Active )
+        {
+            if ( !_hold.Begin( body, _holdInfo, out var error ) )
+            {
+                if ( error != null )
+                    WarnOnce( $"hold:{error}", $"Weapon Hold: hold pose ignored ({error})." );
+                _holdInfo = null;
+                return;
+            }
+            _holdTime = 0f;
+        }
+        _holdTime += MathF.Max( 0f, dt );
+        var length = _hold.Duration;
+        _hold.Update( body, length > 0f ? _holdTime % length : 0f, 1f );
+    }
+
     private void UpdateOverlay( SkinnedModelRenderer body )
     {
         if ( !_overlay.Active || _activeOverlay == null )
             return;
-        float blend = MathF.Max( 1e-3f, _activeOverlay.Blend );
-        float fadeIn = _elapsed / blend;
-        float fadeOut = (_duration - _elapsed) / blend;
+        bool loop = !_releasing && Held( _role );
+        // The animation is fitted to the action's length, but kept near its natural speed: a
+        // gesture much shorter than a long first-person use plays at its own pace and ends early,
+        // instead of in slow motion.
+        float rate = _overlay.Duration > 0f && _duration > 0f ? Math.Clamp( _overlay.Duration / _duration, MinOverlayRate, MaxOverlayRate ) : 1f;
+        float seconds = _elapsed * rate;
+        float remaining = MathF.Min( _duration - _elapsed, _overlay.Duration > 0f ? (_overlay.Duration - seconds) / rate : _duration - _elapsed );
+        // Loops and a released loop fading out run in real time.
+        if ( (loop || _releasing) && _overlay.Duration > 0f )
+        {
+            seconds = _elapsed % _overlay.Duration;
+            remaining = _duration - _elapsed;
+        }
+        // Short actions (a shot) fade faster so the animation still reaches full weight.
+        float blend = Math.Clamp( _activeOverlay.Blend, 1e-3f, MathF.Max( 1e-3f, MathF.Min( _duration, _overlay.Duration / rate ) * 0.25f ) );
+        // Chained parts: no fade in after the previous part, no fade out while the next one follows.
+        float fadeIn = _overlayChained ? 1f : _elapsed / blend;
+        float fadeOut = loop || ContinuesInto( _role ) ? 1f : remaining / blend;
         float w = Math.Clamp( MathF.Min( fadeIn, fadeOut ), 0f, 1f );
         w = w * w * (3f - 2f * w);
         if ( _paused )
-            w = _elapsed <= 0f || _elapsed >= _duration ? w : 1f;
-        float seconds = _overlay.Duration > 0f && _duration > 0f ? _elapsed / _duration * _overlay.Duration : _elapsed;
+            w = _elapsed <= 0f || remaining <= 0f ? w : 1f;
         _overlay.Update( body, seconds, w );
     }
 
@@ -574,7 +717,8 @@ public sealed class WeaponHold : Component
         _elapsed += dt;
         if ( _sinceAction < float.MaxValue )
             _sinceAction += dt;
-        if ( _role == IdleRole )
+        // Idle, and a guard or a held use while the button stays down, loop.
+        if ( _role == IdleRole || (!_releasing && Held( _role )) )
         {
             if ( _duration > 0f && _elapsed >= _duration )
                 _elapsed %= _duration;
@@ -583,6 +727,18 @@ public sealed class WeaponHold : Component
 
         if ( _elapsed < _duration )
             return;
+        // Raising the guard / starting a held use: on to the loop, or straight to the end if let go.
+        if ( _role is BlockStartRole or UseStartRole )
+        {
+            var (loop, end, on) = _role == BlockStartRole ? (BlockRole, BlockEndRole, Blocking) : (UseLoopRole, UseEndRole, Using);
+            if ( on && HasAction( loop ) )
+                StartAction( loop, weapon, chained: true );
+            else if ( HasAction( end ) )
+                StartAction( end, weapon, chained: true );
+            else
+                StartAction( RestRole(), weapon );
+            return;
+        }
         // Shell-by-shell reload: start -> one insert per shell -> end.
         if ( _role == ReloadStartRole )
         {
@@ -602,7 +758,61 @@ public sealed class WeaponHold : Component
                 FinishShells( weapon );
             return;
         }
-        StartAction( IdleRole, weapon );
+        StartAction( RestRole(), weapon );
+    }
+
+    /// <summary>What plays when an action ends: the guard or the held use while still on, else idle.</summary>
+    private string RestRole()
+    {
+        if ( Blocking && HasAction( BlockRole ) )
+            return BlockRole;
+        if ( Using && HasAction( UseLoopRole ) )
+            return UseLoopRole;
+        return IdleRole;
+    }
+
+    /// <summary>A looping part whose button is still down.</summary>
+    private bool Held( string role ) => (role == BlockRole && Blocking) || (role == UseLoopRole && Using);
+
+    /// <summary>The weapon or the character has something to play for this action.</summary>
+    private bool HasAction( string role ) => HasClip( role ) || _overlays.ContainsKey( role );
+
+    private bool _blockingWas, _usingWas, _releasing;
+
+    /// <summary>Starts and ends the guard and the held use as <see cref="Blocking"/> and <see cref="Using"/> change.</summary>
+    private void UpdateHeldActions( SkinnedModelRenderer weapon )
+    {
+        HeldChange( Blocking, ref _blockingWas, BlockStartRole, BlockRole, BlockEndRole, weapon );
+        HeldChange( Using, ref _usingWas, UseStartRole, UseLoopRole, UseEndRole, weapon );
+    }
+
+    private void HeldChange( bool on, ref bool was, string start, string loop, string end, SkinnedModelRenderer weapon )
+    {
+        if ( on == was )
+            return;
+        was = on;
+        if ( on )
+        {
+            if ( _role == start || _role == loop )
+                return;
+            if ( HasAction( start ) )
+                StartAction( start, weapon );
+            else if ( HasAction( loop ) )
+                StartAction( loop, weapon );
+            return;
+        }
+        // Let go: the loop ends (the start part finishes first and then ends by itself).
+        if ( _role != loop )
+            return;
+        if ( HasAction( end ) )
+        {
+            StartAction( end, weapon, chained: true );
+            return;
+        }
+        // No end part: fade the loop out and go back to idle.
+        _releasing = true;
+        var blend = _activeOverlay != null ? MathF.Max( 0.05f, _activeOverlay.Blend ) : 0.15f;
+        _duration = MathF.Min( _duration, _elapsed + blend );
     }
 
     private void FinishShells( SkinnedModelRenderer weapon )
@@ -631,9 +841,13 @@ public sealed class WeaponHold : Component
         return new ActionInfo { Role = info.Role, Seconds = 0f, Sequence = info.Variants[index - 1], Trigger = info.Trigger };
     }
 
-    private void StartAction( string role, SkinnedModelRenderer weapon )
+    private void StartAction( string role, SkinnedModelRenderer weapon, bool chained = false )
     {
         ShellReloadState( role );
+        _releasing = false;
+        // A part following on from the previous one (block start -> block -> block end) keeps
+        // the character animation at full weight instead of fading out and back in.
+        _overlayChained = chained && _overlay.Active && _overlay.Weight > 0.5f;
         _role = role;
         _elapsed = 0f;
         _sinceAction = 0f;
@@ -683,7 +897,17 @@ public sealed class WeaponHold : Component
         var body = ResolveBody();
         if ( !body.IsValid() )
             return;
-        if ( !_overlay.Begin( body, overlay, out var error ) )
+        // Several character animations for one action (attack combos) play in turn.
+        var sequence = overlay.Sequence;
+        if ( overlay.Variants.Count > 0 )
+        {
+            _nextOverlayVariant.TryGetValue( role, out var turn );
+            turn %= overlay.Variants.Count + 1;
+            _nextOverlayVariant[role] = turn + 1;
+            if ( turn > 0 )
+                sequence = overlay.Variants[turn - 1];
+        }
+        if ( !_overlay.Begin( body, overlay, sequence, out var error ) )
         {
             if ( error != null )
                 WarnOnce( $"overlay:{role}:{error}", $"Weapon Hold: character animation for '{role}' ignored ({error})." );
@@ -708,7 +932,8 @@ public sealed class WeaponHold : Component
             // The model is the authority: the renderer's own sequence list lags a frame behind a
             // model change. A model without any animations (a static prop) has nothing to play.
             var model = weapon.Model;
-            var animated = model != null && !model.IsError && model.AnimationCount > 0;
+            // A disabled renderer (fists: nothing shown in third person) has no scene model to play on.
+            var animated = model != null && !model.IsError && model.AnimationCount > 0 && weapon.SceneModel != null;
             if ( animated && !model.AnimationNames.Contains( info.Sequence ) )
             {
                 WarnOnce( $"seq:{info.Sequence}", $"Weapon Hold: weapon model has no sequence '{info.Sequence}' (action '{info.Role}')." );
@@ -950,6 +1175,9 @@ public sealed class WeaponHold : Component
         RightElbowHint = rightPrimary ? p.PrimaryElbowHint : p.SecondaryElbowHint;
         LeftElbowHint = rightPrimary ? p.SecondaryElbowHint : p.PrimaryElbowHint;
         SupportHand = p.TwoHanded;
+        SecondWeaponBone = p.SecondWeaponBone;
+        SecondHoldBone = string.IsNullOrEmpty( p.SecondHoldBone ) ? SecondHoldBone : p.SecondHoldBone;
+        SecondInHold = p.SecondWeaponOffset;
         Contacts = p.Contacts;
         Actions = p.Actions;
         CharacterActions = p.CharacterActions;
@@ -1044,6 +1272,8 @@ public sealed class WeaponHold : Component
                 WarnOnce( "CharacterActions:" + CharacterActions, $"Weapon Hold: CharacterActions ignored ({error})." );
             _activeOverlay = null;
             _overlay.End();
+            _overlays.TryGetValue( IdleRole, out _holdInfo );
+            _hold.End();
         }
 
         if ( rebuildTriggers )
@@ -1488,7 +1718,10 @@ public sealed class WeaponHold : Component
         }
 
         /// <summary>Forward kinematics with the weighted correction; writes an override for every bone of the subtree.</summary>
-        public void Write( SceneModel sceneModel, float weight )
+        public void Write( SceneModel sceneModel, float weight ) => Write( sceneModel, weight, weight );
+
+        /// <summary>Writes the arm with <paramref name="weight"/> of the IK correction and <paramref name="fingerWeight"/> of the finger pose.</summary>
+        public void Write( SceneModel sceneModel, float weight, float fingerWeight )
         {
             var upperDelta = ArmSolver.Weighted( _upperDelta, weight );
             var lowerDelta = ArmSolver.Weighted( _lowerDelta, weight );
@@ -1515,7 +1748,7 @@ public sealed class WeaponHold : Component
                     float progress = FingerProgress( Now );
                     if ( progress < 1f )
                         finger = ArmSolver.Slerp( _hasFingerFrom[i] ? _fingerFrom[i] : local.Rotation, finger, progress );
-                    local.Rotation = ArmSolver.Slerp( local.Rotation, finger, weight );
+                    local.Rotation = ArmSolver.Slerp( local.Rotation, finger, fingerWeight );
                     pose = _pose[parent].ToWorld( local );
                 }
                 else if ( _twistCancel[i] > 0f )

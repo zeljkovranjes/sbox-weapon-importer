@@ -16,11 +16,30 @@ public static class ActionTiming
     {
         // The character drives actions it triggers itself; the weapon clip is stretched to fit.
         // Shell-reload parts keep their own clip lengths (the reload is as long as its shells).
-        if (AnimationRoles.GraphTrigger(role) is not null && !AnimationRoles.IsShellReload(role) && setup.ActionSeconds.TryGetValue(role, out var measured) && measured > 0.05f)
+        // A replacement character animation (stock or picked) replaces the character's own action:
+        // the weapon clip decides, else the animation itself (see OverlayDecides).
+        if (AnimationRoles.GraphTrigger(role) is not null && !AnimationRoles.IsShellReload(role) && !OverlayDecides(setup, role) && setup.ActionSeconds.TryGetValue(role, out var measured) && measured > 0.05f)
             return measured;
         if (setup.WeaponAnimations.TryGetValue(role, out var binding) && asset?.FindClip(binding.Clip) is { Duration: > 0.01f } clip)
             return MathF.Max(clip.Duration, 0.05f);
         return DefaultSeconds(role);
+    }
+
+    /// <summary>
+    /// The character plays a replacement animation for this role instead of its animgraph action,
+    /// so the animgraph's timing doesn't apply.
+    /// </summary>
+    public static bool OverlayDecides(WeaponSetup setup, AnimationRole role)
+        => setup.ThirdPerson.TryGetValue(role, out var tp) && tp.Source == CharacterAnimationSource.Sequence && !string.IsNullOrEmpty(tp.Sequence);
+
+    /// <summary>
+    /// Seconds the baked action table holds: 0 lets the replacement animation decide at runtime
+    /// when the weapon has no clip of its own for the role.
+    /// </summary>
+    public static float BakedSeconds(WeaponSetup setup, WeaponAsset? asset, AnimationRole role)
+    {
+        var hasClip = setup.WeaponAnimations.TryGetValue(role, out var binding) && asset?.FindClip(binding.Clip) is { Duration: > 0.01f };
+        return OverlayDecides(setup, role) && !hasClip ? 0f : Seconds(setup, asset, role);
     }
 
     public static float DefaultSeconds(AnimationRole role) => role switch

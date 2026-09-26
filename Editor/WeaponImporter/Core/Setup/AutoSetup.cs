@@ -18,7 +18,8 @@ using Vector3 = System.Numerics.Vector3;
 /// </summary>
 public static class AutoSetup
 {
-    public static WeaponSetup Build(WeaponAnalysis a, WeaponSetup? previous = null)
+    /// <param name="stock">The installed stock third-person sequences (none when not installed).</param>
+    public static WeaponSetup Build(WeaponAnalysis a, WeaponSetup? previous = null, IReadOnlyCollection<string>? stock = null)
     {
         var s = previous ?? new WeaponSetup();
         s.Name = string.IsNullOrEmpty(s.Name) || s.Name == "weapon" ? a.Asset.Name : s.Name;
@@ -53,7 +54,10 @@ public static class AutoSetup
             s.Primary = Grip(primary);
         if (s.Support is not { Manual: true })
             s.Support = a.Support is { } support ? Grip(support) : null;
-        s.UseSupportHand = s.Support is not null && (WeaponTypes.TwoHanded(s.Type) || s.Type == WeaponType.Melee);
+        // One copy in each hand: the left hand holds its own, not the right one's.
+        if (!s.DualManual)
+            s.Dual = a.Dual;
+        s.UseSupportHand = s.Support is not null && (WeaponTypes.TwoHanded(s.Type) || s.Type == WeaponType.Melee) && !s.Dual;
 
         // Weapon clips per role.
         foreach (var role in AnimationRoles.All)
@@ -75,6 +79,12 @@ public static class AutoSetup
         foreach (var role in AnimationRoles.All)
             if (!s.ThirdPerson.TryGetValue(role, out var tp) || !tp.Manual)
                 s.ThirdPerson[role] = new CharacterAnimation { Source = CharacterAnimationSource.Graph };
+
+        // Stock animations, when installed: a hold and actions suited to the weapon.
+        if (!s.StockStyleManual)
+            s.StockStyle = StockThirdPerson.Suggest(s.Type, StockThirdPerson.NameOf(a.Asset), a.Length, s.UseSupportHand && s.Support is not null, s.Dual);
+        if (stock is { Count: > 0 })
+            StockThirdPerson.Apply(s, s.StockStyle, stock);
 
         DefaultContacts(s, a);
         DetectEvents(s, a);

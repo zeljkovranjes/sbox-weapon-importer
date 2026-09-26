@@ -21,7 +21,7 @@ public sealed class AnimationsStep : StepPanel
 		var weapon = string.Join( ",", s.WeaponAnimations.OrderBy( kv => kv.Key ).Select( kv => $"{kv.Key}={kv.Value.Clip}:{kv.Value.Manual}:{string.Join( "+", kv.Value.Variants )}" ) ) + s.Type;
 		var third = string.Join( ",", s.ThirdPerson.OrderBy( kv => kv.Key ).Select( kv => $"{kv.Key}={kv.Value.Source}:{kv.Value.Sequence}" ) );
 		var splits = string.Join( ",", C.Session.TakeParts.Select( kv => $"{kv.Key}:{kv.Value.Count}" ) ) + string.Join( ",", s.TakeSplits.Select( kv => $"{kv.Key}={string.Join( "/", kv.Value )}" ) );
-		return $"{weapon}|{third}|{C.BakedModelPath is null}|{C.Analysis.Asset.Clips.Count}|{splits}";
+		return $"{weapon}|{third}|{C.BakedModelPath is null}|{C.Analysis.Asset.Clips.Count}|{splits}|{StockAnimations.Installed}|{s.StockStyle}:{s.StockStyleManual}";
 	}
 
 	protected override void Build()
@@ -58,7 +58,67 @@ public sealed class AnimationsStep : StepPanel
 		}
 
 		BuildTakes();
+		BuildStock();
 		BuildRetarget();
+	}
+
+	/// <summary>The stock third-person animations: download them, or pick how the character holds and uses the weapon.</summary>
+	private void BuildStock()
+	{
+		var s = C.Setup;
+		var card = AddCard( "accessibility_new", "Third-person stock animations", out _, "Ready-made character animations for items, throws, dual pistols, melee and fists, on the s&box human" );
+		if ( !StockAnimations.Installed )
+		{
+			card.Layout.Add( UiStyle.Muted( new Label( "Holds and actions for what the character's animgraph doesn't cover: drinking, injecting, eating, pills, bandaging, devices, throwing, dual pistols, one- and two-handed melee, polearms, dual blades and fists. Optional, under 1 MB, added to this project's Assets.", card ) { WordWrap = true }, small: true ) );
+			var row = card.Layout.AddRow();
+			row.Spacing = 6;
+			row.Add( UiStyle.Secondary( card, "Download stock animations", "download", DownloadStock, $"Download from {StockAnimations.Url}" ) );
+			row.AddStretchCell();
+			return;
+		}
+		var field = UiStyle.FieldRow( card, card.Layout, "Style", "How the character holds and uses this weapon in third person. The hold plays over the upper body while the weapon is held; attacks, blocks and uses play over it." );
+		var covered = StockThirdPerson.Sequences( s.StockStyle ).Select( e => AnimationRoles.Label( e.Role, s.Type ) ).Distinct().ToList();
+		var tip = s.StockStyle == StockStyle.None ? "The character's animgraph plays every action. Click to change." : $"Stock animations for: {string.Join( ", ", covered )}. Click to change.";
+		field.Add( new ClickField( card, StockThirdPerson.Label( s.StockStyle ), "accessibility_new", s.StockStyle == StockStyle.None ? Theme.TextLight : Theme.Green, ChooseStockStyle, tip ), 1 );
+		field.Add( s.StockStyleManual ? new Pill( card, "EDITED", Theme.Blue, "You picked this style", column: true ) : new Pill( card, "AUTO", Theme.TextLight, "Picked from the weapon's type, name and size", column: true ) );
+	}
+
+	private void DownloadStock()
+	{
+		Safe( () => _ = C.RunAsync( "Downloading stock animations", async ( progress, cancel ) =>
+		{
+			var error = await StockAnimations.InstallAsync( progress, cancel );
+			if ( error is not null )
+				throw new InvalidOperationException( error );
+			await C.Session.ApplyStockAsync( progress, cancel );
+			C.MarkChanged();
+		}, done: "Stock animations installed" ) );
+	}
+
+	private void ChooseStockStyle()
+	{
+		var s = C.Setup;
+		var a = C.Analysis;
+		var suggested = StockThirdPerson.Suggest( s.Type, StockThirdPerson.NameOf( a.Asset ), a.Length, s.UseSupportHand && s.Support is not null, s.Dual );
+		var menu = new Menu( this );
+		menu.AddHeading( "Third-person style" );
+		menu.AddOption( $"Automatic ({StockThirdPerson.Label( suggested )})", "auto_fix_high", () => SetStockStyle( suggested, false ) );
+		menu.AddSeparator();
+		foreach ( var style in StockThirdPerson.Styles )
+		{
+			var st = style;
+			menu.AddOption( StockThirdPerson.Label( st ), st == s.StockStyle ? "check" : "accessibility_new", () => SetStockStyle( st, true ) );
+		}
+		menu.OpenAtCursor();
+	}
+
+	private void SetStockStyle( StockStyle style, bool manual )
+	{
+		Safe( () => _ = C.RunAsync( "Changing the third-person style", async ( progress, cancel ) =>
+		{
+			await C.Session.SetStockStyleAsync( style, manual, progress, cancel );
+			C.MarkChanged();
+		}, done: $"Third person: {StockThirdPerson.Label( style )}" ) );
 	}
 
 	/// <summary>Takes holding several actions on one timeline, split into one clip per action.</summary>
@@ -111,7 +171,7 @@ public sealed class AnimationsStep : StepPanel
 		var card = AddCard( "sync_alt", "Third-person animation", out _, "Bring your own character animations (FBX / BVH) for the third-person actions" );
 		if ( RetargeterBridge.IsInstalled )
 		{
-			card.Layout.Add( UiStyle.Muted( new Label( "Retarget a character animation onto the s&box character, then pick its sequence with the person button on a row.", card ) { WordWrap = true }, small: true ) );
+			card.Layout.Add( UiStyle.Muted( new Label( "Give an action your own animation from any humanoid rig: click its person button and choose Your animation file. It is retargeted onto the character and used for that action. Open the retargeter for more control.", card ) { WordWrap = true }, small: true ) );
 			var row = card.Layout.AddRow();
 			row.Add( UiStyle.Secondary( card, "Retarget third-person animation…", "sync_alt", Retarget, "Open the Humanoid Retargeter with animation files (FBX, BVH)" ) );
 			row.AddStretchCell();
@@ -265,7 +325,22 @@ public sealed class AnimationsStep : StepPanel
 		menu.AddHeading( $"Third person · {AnimationRoles.Label( role )}" );
 		menu.AddOption( "Character animgraph", "account_tree", () => SetThirdPerson( role, new CharacterAnimation { Source = CharacterAnimationSource.Graph, Manual = true } ) );
 		AddCharacterSequences( menu.AddMenu( "Character sequence", "accessibility_new" ), role );
+		if ( StockAnimations.Sequences is { Count: > 0 } stock )
+		{
+			var sub = menu.AddMenu( "Stock animation", "inventory_2" );
+			foreach ( var group in stock.OrderBy( n => n, StringComparer.Ordinal ).GroupBy( n => n.Split( '_' ).Skip( 1 ).FirstOrDefault() ?? "" ) )
+			{
+				var groupMenu = sub.AddMenu( group.Key, "folder" );
+				foreach ( var n in group )
+				{
+					var name = n;
+					groupMenu.AddOption( name, "movie", () => SetThirdPerson( role, new CharacterAnimation { Source = CharacterAnimationSource.Sequence, Model = StockThirdPerson.Model, Sequence = name, Manual = true } ) );
+				}
+			}
+		}
 		menu.AddOption( "Sequence from another model…", "folder_open", () => PickSequence( role ) );
+		if ( RetargeterBridge.IsInstalled )
+			menu.AddOption( "Your animation file…", "sync_alt", () => RetargetFor( role ) );
 		menu.AddSeparator();
 		menu.AddOption( "None", "block", () => SetThirdPerson( role, new CharacterAnimation { Source = CharacterAnimationSource.None, Manual = true } ) );
 		menu.OpenAtCursor();
@@ -335,7 +410,42 @@ public sealed class AnimationsStep : StepPanel
 			C.Setup.ThirdPerson[role] = value;
 			C.MarkChanged();
 			C.SelectRole( role );
+			// The idle is the hold: the grip is fitted to it.
+			if ( role == AnimationRole.Idle )
+				_ = C.RunAsync( "Fitting the grip to the new hold", ( p, c ) => C.Session.RefitHoldAsync( p, c ) );
 		} );
+	}
+
+	/// <summary>
+	/// An animation file from any humanoid rig (FBX, BVH, glTF): retargeted onto the character by
+	/// the Humanoid Retargeter, written beside the weapon and used for this action.
+	/// </summary>
+	private void RetargetFor( AnimationRole role )
+	{
+		var label = AnimationRoles.Label( role, C.Setup.Type );
+		var path = EditorUtility.OpenFileDialog( $"Third-person animation for {label}", "Animations (*.fbx *.bvh *.glb *.gltf)", null );
+		if ( string.IsNullOrEmpty( path ) )
+			return;
+		var session = C.Session;
+		var stem = EngineNames.Sanitize( System.IO.Path.GetFileNameWithoutExtension( path ) ).ToLowerInvariant();
+		var folder = $"{session.OutputFolder}/third_person";
+		var modelName = $"{EngineNames.Sanitize( session.Setup.Name ).ToLowerInvariant()}_tp_{stem}";
+		Safe( () => _ = C.RunAsync( $"Retargeting {System.IO.Path.GetFileName( path )}", async ( progress, cancel ) =>
+		{
+			var result = await RetargeterBridge.RetargetAsync( new[] { path }, folder, modelName, progress, cancel );
+			await EditorThread.SwitchToMainThread();
+			if ( result.ModelPath.Length == 0 || result.Sequences.Count == 0 )
+				throw new InvalidOperationException( result.Error ?? "Nothing was retargeted." );
+			// A file with several clips: the one named like this action, else the first.
+			var sequence = result.Sequences.FirstOrDefault( s => AnimationClassifier.Classify( s ).Role == role ) ?? result.Sequences[0];
+			C.Setup.ThirdPerson[role] = new CharacterAnimation { Source = CharacterAnimationSource.Sequence, Model = result.ModelPath, Sequence = sequence, Manual = true };
+			C.MarkChanged();
+			C.SelectRole( role );
+			if ( role == AnimationRole.Idle )
+				await C.Session.RefitHoldAsync( progress, cancel );
+			if ( result.Error is not null )
+				C.SetStatus( result.Error, Theme.Yellow );
+		}, done: $"{label} plays your animation in third person" ) );
 	}
 
 	public override void OnDestroyed()

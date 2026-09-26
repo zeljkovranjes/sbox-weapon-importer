@@ -66,8 +66,12 @@ public static class TemplateAdapter
         }
 
         if (parts.HasFlag(TemplateParts.ThirdPerson))
+        {
             foreach (var (role, tp) in template.ThirdPerson)
-                target.ThirdPerson[role] = new CharacterAnimation { Source = tp.Source, Model = tp.Model, Sequence = tp.Sequence, Manual = tp.Manual };
+                target.ThirdPerson[role] = new CharacterAnimation { Source = tp.Source, Model = tp.Model, Sequence = tp.Sequence, Variants = tp.Variants?.ToList() ?? new List<string>(), Manual = tp.Manual };
+            target.StockStyle = template.StockStyle;
+            target.StockStyleManual = template.StockStyleManual;
+        }
 
         if (parts.HasFlag(TemplateParts.Events))
         {

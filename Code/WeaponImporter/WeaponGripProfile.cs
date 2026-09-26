@@ -41,6 +41,15 @@ public sealed class WeaponGripProfile : GameResource
     /// <summary>Character bone the weapon is held by.</summary>
     public string HoldBone { get; set; } = "hold_R";
 
+    /// <summary>Dual weapons: the left-hand copy's root bone ("" = a single weapon).</summary>
+    public string SecondWeaponBone { get; set; } = "";
+
+    /// <summary>Dual weapons: the character bone the left-hand copy is held by.</summary>
+    public string SecondHoldBone { get; set; } = "";
+
+    /// <summary>Dual weapons: the left-hand copy's bone relative to <see cref="SecondHoldBone"/>.</summary>
+    public string SecondWeaponOffset { get; set; } = "";
+
     [Header( "Contact" )]
     /// <summary>Per-action hand contact tracks (JSON, see <see cref="WeaponHold.Contacts"/>).</summary>
     public string Contacts { get; set; } = "";

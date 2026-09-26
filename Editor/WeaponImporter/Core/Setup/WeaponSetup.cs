@@ -69,6 +69,17 @@ public sealed class WeaponSetup
     public Dictionary<AnimationRole, CharacterAnimation> ThirdPerson { get; set; } = new();
 
     /// <summary>
+    /// How the character holds and uses the weapon with the stock third-person animations (when
+    /// they are installed); picked from the weapon unless <see cref="StockStyleManual"/>.
+    /// </summary>
+    public StockStyle StockStyle { get; set; }
+    public bool StockStyleManual { get; set; }
+
+    /// <summary>One weapon in each hand (the second copy follows the left hand).</summary>
+    public bool Dual { get; set; }
+    public bool DualManual { get; set; }
+
+    /// <summary>
     /// How long the character's own action runs (measured through its animgraph) for roles it
     /// triggers itself; third-person actions last this long so hands and body stay in step.
     /// </summary>
@@ -186,6 +197,8 @@ public sealed class WeaponSetup
         setup.Parts ??= new();
         setup.WeaponAnimations ??= new();
         setup.ThirdPerson ??= new();
+        foreach (var tp in setup.ThirdPerson.Values)
+            tp.Variants ??= new();
         setup.Contacts ??= new();
         setup.ActionSeconds ??= new();
         setup.TextureChoices ??= new();
@@ -297,6 +310,8 @@ public sealed class CharacterAnimation
     public CharacterAnimationSource Source { get; set; } = CharacterAnimationSource.Graph;
     public string Model { get; set; } = "";
     public string Sequence { get; set; } = "";
+    /// <summary>More sequences of the same model played in turn (attack combos).</summary>
+    public List<string> Variants { get; set; } = new();
     public bool Manual { get; set; }
 
     public string Describe() => Source switch
@@ -424,6 +439,14 @@ public sealed class BakedGrip
     public float[]? LeftElbow { get; set; }
     public string Quality { get; set; } = "";
 
+    /// <summary>
+    /// Dual weapons: the left-hand copy's root bone in the weapon model, and its transform
+    /// relative to <see cref="SecondHoldBone"/> (it follows the left hand).
+    /// </summary>
+    public string SecondWeaponBone { get; set; } = "";
+    public string SecondHoldBone { get; set; } = "";
+    public float[]? SecondInHold { get; set; }
+
     /// <summary>Largest change treated as sampling noise for hand, weapon and finger values.</summary>
     public const float PoseNoise = 1e-3f;
 
@@ -445,6 +468,7 @@ public sealed class BakedGrip
         LeftHand = Keep(LeftHand, previous.LeftHand, PoseNoise);
         RightElbow = Keep(RightElbow, previous.RightElbow, ElbowNoise);
         LeftElbow = Keep(LeftElbow, previous.LeftElbow, ElbowNoise);
+        SecondInHold = Keep(SecondInHold, previous.SecondInHold, PoseNoise);
         foreach (var name in RightFingers.Keys.ToList())
             if (previous.RightFingers.TryGetValue(name, out var old))
                 RightFingers[name] = Keep(RightFingers[name], old, PoseNoise)!;
