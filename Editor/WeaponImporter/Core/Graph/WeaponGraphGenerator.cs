@@ -5,7 +5,11 @@ using WeaponImporter.Core.Analysis;
 namespace WeaponImporter.Core.Graph;
 
 /// <summary>One weapon clip the graph can play: its role, compiled sequence name, looping and length.</summary>
-public sealed record GraphClip(AnimationRole Role, string Sequence, bool Loop, float Seconds);
+public sealed record GraphClip(AnimationRole Role, string Sequence, bool Loop, float Seconds)
+{
+    /// <summary>More sequences for the role, played in turn with <see cref="Sequence"/> (picked by <c>attack_variant</c>).</summary>
+    public IReadOnlyList<string> Variants { get; init; } = Array.Empty<string>();
+}
 
 /// <summary>Parameter names of generated weapon graphs (Facepunch first-person conventions where they exist).</summary>
 public static class WeaponParams
@@ -25,6 +29,12 @@ public static class WeaponParams
     public const string Pump = "b_pump";
     public const string Melee = "b_melee";
     public const string Jump = "b_jump";
+    public const string Attack2 = "b_attack2";
+    public const string Block = "b_block";
+    public const string Use = "b_use";
+    public const string Throw = "b_throw";
+    /// <summary>Which attack plays next when the attack has several clips (1-based, cycled by Weapon Viewmodel).</summary>
+    public const string AttackVariant = "attack_variant";
     public const string SpeedReload = "speed_reload";
     public const string SpeedDeploy = "speed_deploy";
     public const string SpeedIronsights = "speed_ironsights";
@@ -63,6 +73,7 @@ public static class WeaponGraphGenerator
     {
         Idle, Fire, FireLast, FireAds, DryFire, Reload, ReloadEmpty, ReloadStart, ReloadInsert, ReloadEnd,
         Deploy, Holster, Inspect, Walk, Sprint, AdsIn, AdsIdle, AdsOut, FireMode, Pump, Bolt, Melee, Jump,
+        Attack2, BlockStart, Block, BlockEnd, Use, UseStart, UseLoop, UseEnd, Throw,
     }
 
     private static Slot? SlotFor(AnimationRole role) => role switch
@@ -88,6 +99,15 @@ public static class WeaponGraphGenerator
         AnimationRole.AdsFire => Slot.FireAds,
         AnimationRole.Melee => Slot.Melee,
         AnimationRole.Bolt => Slot.Bolt,
+        AnimationRole.Attack2 => Slot.Attack2,
+        AnimationRole.BlockStart => Slot.BlockStart,
+        AnimationRole.Block => Slot.Block,
+        AnimationRole.BlockEnd => Slot.BlockEnd,
+        AnimationRole.Use => Slot.Use,
+        AnimationRole.UseStart => Slot.UseStart,
+        AnimationRole.UseLoop => Slot.UseLoop,
+        AnimationRole.UseEnd => Slot.UseEnd,
+        AnimationRole.Throw => Slot.Throw,
         _ => null,                                      // Jam / Unjam / Unknown: no graph state
     };
 
@@ -159,6 +179,16 @@ public static class WeaponGraphGenerator
         var pPump = Has(Slot.Pump) || Has(Slot.Bolt) ? graph.BoolParam(WeaponParams.Pump, autoReset: true) : 0;
         var pMelee = Has(Slot.Melee) && Has(Slot.Fire) ? graph.BoolParam(WeaponParams.Melee, autoReset: true) : 0;
         var pJump = Has(Slot.Jump) ? graph.BoolParam(WeaponParams.Jump, autoReset: true) : 0;
+        var pAttack2 = Has(Slot.Attack2) ? graph.BoolParam(WeaponParams.Attack2, autoReset: true) : 0;
+        var hasBlock = Has(Slot.Block) || Has(Slot.BlockStart);
+        var pBlock = hasBlock ? graph.BoolParam(WeaponParams.Block, autoReset: false) : 0;
+        // A held use (start / loop / end) keeps b_use on while in use; a one-shot use resets itself.
+        var heldUse = Has(Slot.UseLoop) || Has(Slot.UseStart) && Has(Slot.UseEnd);
+        var pUse = Has(Slot.Use) || Has(Slot.UseStart) || Has(Slot.UseLoop) ? graph.BoolParam(WeaponParams.Use, autoReset: !heldUse) : 0;
+        var pThrow = Has(Slot.Throw) ? graph.BoolParam(WeaponParams.Throw, autoReset: true) : 0;
+        // Several clips for one attack: attack_variant picks which plays (1-based).
+        var variantCount = new[] { Slot.Fire, Slot.Melee, Slot.Attack2 }.Where(Has).Select(s => 1 + Seq(s).Variants.Count).DefaultIfEmpty(1).Max();
+        var pVariant = variantCount > 1 ? graph.EnumParam(WeaponParams.AttackVariant, Enumerable.Range(1, variantCount).Select(i => i.ToString()).ToList()) : 0;
 
         // ---------------------------------------------------------------- nodes / states
         float y = 0;
@@ -168,6 +198,18 @@ public static class WeaponGraphGenerator
             var node = graph.Sequence(sequence.Sequence, sequence.Sequence, sequence.Loop, -600, y, 1f, spans);
             y += 96;
             return speedParam != 0 ? graph.SpeedScale(sequence.Sequence + " speed", node, speedParam, -380, y - 96) : node;
+        }
+
+        // With several clips for an attack, the first plays on attack_variant 1 only.
+        GraphKvObject[] First(Slot slot, params GraphKvObject[] conditions)
+            => pVariant != 0 && Seq(slot).Variants.Count > 0 ? conditions.Append(StateMachineBuilder.Enum(pVariant, CompareOp.Equal, 0)).ToArray() : conditions;
+
+        // A variant clip: same settings as its role's clip (never looping).
+        long VariantNode(string sequence)
+        {
+            var node = graph.Sequence(sequence, sequence, false, -600, y, 1f);
+            y += 96;
+            return node;
         }
 
         float column = 0;
@@ -304,6 +346,13 @@ public static class WeaponGraphGenerator
             // keep the aimed pose (the viewmodel adds its own kick). Hip fire only when not aimed.
             var hipOnly = adsIdle is not null && !Has(Slot.FireAds);
             var fire = State("Fire", Node(Slot.Fire));
+            // Extra attack clips: attack_variant 2, 3... play them instead of the first.
+            foreach (var (variant, index) in Seq(Slot.Fire).Variants.Select((v, i) => (v, i + 1)))
+            {
+                var other = State($"Fire {index + 1}", VariantNode(variant));
+                sm.Transition(any, other, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.Enum(pVariant, CompareOp.Equal, index), StateMachineBuilder.TagActive(busy, false));
+                sm.Transition(other, idle, Blend, false, StateMachineBuilder.Finished());
+            }
             if (Has(Slot.FireLast) && pEmpty != 0)
             {
                 var last = State("Fire Last", Node(Slot.FireLast));
@@ -314,9 +363,9 @@ public static class WeaponGraphGenerator
                 sm.Transition(last, idle, Blend, false, StateMachineBuilder.Finished());
             }
             if (hipOnly)
-                sm.Transition(any, fire, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.TagActive(busy, false), StateMachineBuilder.TagActive(aiming, false));
+                sm.Transition(any, fire, 0f, true, First(Slot.Fire, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.TagActive(busy, false), StateMachineBuilder.TagActive(aiming, false)));
             else
-                sm.Transition(any, fire, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.TagActive(busy, false));
+                sm.Transition(any, fire, 0f, true, First(Slot.Fire, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.TagActive(busy, false)));
 
             // Bolt/pump actions chain after the shot when the fire clip does not cycle the action itself.
             var actionRole = Has(Slot.Pump) ? Slot.Pump : Has(Slot.Bolt) ? Slot.Bolt : (Slot?)null;
@@ -340,8 +389,83 @@ public static class WeaponGraphGenerator
         else if (Has(Slot.Melee) && pAttack != 0)
         {
             var swing = State("Melee", Node(Slot.Melee));
-            sm.Transition(any, swing, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.TagActive(busy, false));
+            sm.Transition(any, swing, 0f, true, First(Slot.Melee, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.TagActive(busy, false)));
             sm.Transition(swing, idle, Blend, false, StateMachineBuilder.Finished());
+            foreach (var (variant, index) in Seq(Slot.Melee).Variants.Select((v, i) => (v, i + 1)))
+            {
+                var other = State($"Melee {index + 1}", VariantNode(variant));
+                sm.Transition(any, other, 0f, true, StateMachineBuilder.Bool(pAttack, true), StateMachineBuilder.Enum(pVariant, CompareOp.Equal, index), StateMachineBuilder.TagActive(busy, false));
+                sm.Transition(other, idle, Blend, false, StateMachineBuilder.Finished());
+            }
+        }
+
+        if (pAttack2 != 0)
+        {
+            var heavy = State("Heavy Attack", Node(Slot.Attack2), false, busy);
+            sm.Transition(any, heavy, QuickBlend, true, First(Slot.Attack2, StateMachineBuilder.Bool(pAttack2, true), StateMachineBuilder.TagActive(busy, false)));
+            sm.Transition(heavy, idle, Blend, false, StateMachineBuilder.Finished());
+            foreach (var (variant, index) in Seq(Slot.Attack2).Variants.Select((v, i) => (v, i + 1)))
+            {
+                var other = State($"Heavy Attack {index + 1}", VariantNode(variant), false, busy);
+                sm.Transition(any, other, QuickBlend, true, StateMachineBuilder.Bool(pAttack2, true), StateMachineBuilder.Enum(pVariant, CompareOp.Equal, index), StateMachineBuilder.TagActive(busy, false));
+                sm.Transition(other, idle, Blend, false, StateMachineBuilder.Finished());
+            }
+        }
+
+        // Guard: raise on b_block, hold while it stays on, lower when it goes off.
+        if (hasBlock)
+        {
+            var guard = graph.Tag("Blocking", eventTag: false);
+            var holdRole = Has(Slot.Block) ? Slot.Block : Slot.BlockStart;
+            var hold = State("Block", Node(holdRole), false, guard);
+            var start = Has(Slot.BlockStart) && Has(Slot.Block) ? State("Block Start", Node(Slot.BlockStart), false, guard) : null;
+            var end = Has(Slot.BlockEnd) ? State("Block End", Node(Slot.BlockEnd), false, busy) : null;
+            sm.Transition(any, start ?? hold, Blend, true, StateMachineBuilder.Bool(pBlock, true), StateMachineBuilder.TagActive(busy, false), StateMachineBuilder.TagActive(guard, false));
+            if (start is not null)
+            {
+                sm.Transition(start, hold, QuickBlend, false, StateMachineBuilder.Finished());
+                sm.Transition(start, end ?? idle, Blend, true, StateMachineBuilder.Bool(pBlock, false));
+            }
+            sm.Transition(hold, end ?? idle, Blend, true, StateMachineBuilder.Bool(pBlock, false));
+            if (end is not null)
+                sm.Transition(end, idle, Blend, false, StateMachineBuilder.Finished());
+        }
+
+        // Items: use once, or start / hold / finish while b_use stays on.
+        if (pUse != 0)
+        {
+            var inUse = graph.Tag("Using", eventTag: false);
+            if (!heldUse)
+            {
+                var useRole = Has(Slot.Use) ? Slot.Use : Has(Slot.UseStart) ? Slot.UseStart : Slot.UseLoop;
+                var use = State("Use", Node(useRole), false, busy, inUse);
+                sm.Transition(any, use, Blend, true, StateMachineBuilder.Bool(pUse, true), StateMachineBuilder.TagActive(busy, false));
+                sm.Transition(use, idle, Blend, false, StateMachineBuilder.Finished());
+            }
+            else
+            {
+                var start = Has(Slot.UseStart) ? State("Use Start", Node(Slot.UseStart), false, busy, inUse) : null;
+                var loop = Has(Slot.UseLoop) ? State("Use Loop", Node(Slot.UseLoop), false, busy, inUse) : null;
+                var end = Has(Slot.UseEnd) ? State("Use End", Node(Slot.UseEnd), false, busy, inUse) : null;
+                var entry = start ?? loop!;
+                sm.Transition(any, entry, Blend, true, StateMachineBuilder.Bool(pUse, true), StateMachineBuilder.TagActive(busy, false));
+                if (start is not null && loop is not null)
+                    sm.Transition(start, loop, QuickBlend, false, StateMachineBuilder.Finished());
+                if (start is not null)
+                    sm.Transition(start, end ?? idle, Blend, true, StateMachineBuilder.Finished(), StateMachineBuilder.Bool(pUse, false));
+                if (loop is not null)
+                    sm.Transition(loop, end ?? idle, Blend, true, StateMachineBuilder.Bool(pUse, false));
+                if (end is not null)
+                    sm.Transition(end, idle, Blend, false, StateMachineBuilder.Finished());
+            }
+            // A one-shot use clip alongside a held one: the held use wins, the single clip is unused.
+        }
+
+        if (pThrow != 0)
+        {
+            var toss = State("Throw", Node(Slot.Throw), false, busy);
+            sm.Transition(any, toss, QuickBlend, true, StateMachineBuilder.Bool(pThrow, true), StateMachineBuilder.TagActive(busy, false));
+            sm.Transition(toss, idle, Blend, false, StateMachineBuilder.Finished());
         }
 
         if (pMelee != 0)

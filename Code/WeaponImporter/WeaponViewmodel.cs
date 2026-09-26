@@ -102,6 +102,9 @@ public sealed class WeaponViewmodel : Component
         {
             renderer.Set( "ironsights", Hold.Aiming ? 1 : 0 );
             renderer.Set( "b_empty", Hold.Empty );
+            renderer.Set( "b_block", Hold.Blocking );
+            if ( Hold.HasHeldUse )
+                renderer.Set( "b_use", Hold.Using );
         }
         var camera = Scene.Camera;
         if ( _kick > 0f )
@@ -146,6 +149,9 @@ public sealed class WeaponViewmodel : Component
             case "fire":
             case "adsfire":
             case "fireempty":
+                // Several attack clips: the graph plays the one Weapon Hold picked for this attack.
+                if ( Hold.IsValid() )
+                    renderer.Set( "attack_variant", Hold.AttackVariant - 1 );
                 renderer.Set( "b_attack", true );
                 // Aimed without an aimed-fire clip: the graph holds the sights up; kick instead.
                 if ( Hold.IsValid() && Hold.Aiming && string.IsNullOrEmpty( Hold.SequenceFor( "adsfire" ) ) )
@@ -164,6 +170,18 @@ public sealed class WeaponViewmodel : Component
                 break;
             case "inspect":
                 renderer.Set( "b_inspect", true );
+                break;
+            case "attack2":
+                if ( Hold.IsValid() )
+                    renderer.Set( "attack_variant", Hold.AttackVariant - 1 );
+                renderer.Set( "b_attack2", true );
+                break;
+            case "use":
+            case "usestart":
+                renderer.Set( "b_use", true );
+                break;
+            case "throw":
+                renderer.Set( "b_throw", true );
                 break;
             case "holster":
                 renderer.Set( "b_holster", true );

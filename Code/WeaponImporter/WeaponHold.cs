@@ -134,6 +134,30 @@ public sealed class WeaponHold : Component
     /// </summary>
     [Property] public bool Empty { get; set; }
 
+    /// <summary>
+    /// The player holds the guard up (melee weapons, fists). Set it from your input; the
+    /// first-person viewmodel raises, holds and lowers the guard through its animgraph (b_block).
+    /// </summary>
+    [Property] public bool Blocking { get; set; }
+
+    /// <summary>
+    /// The player keeps using the item (held use: drinking, healing). Set it from your input; the
+    /// viewmodel plays the start, loops while it stays on and plays the end (b_use). For a one-off
+    /// use call <c>Play( "use" )</c> instead.
+    /// </summary>
+    [Property] public bool Using { get; set; }
+
+    /// <summary>
+    /// Which clip the current attack plays when the weapon has several (1 = the first; left and
+    /// right punches, a combo of slashes). Advances with every attack.
+    /// </summary>
+    public int AttackVariant { get; private set; } = 1;
+
+    private readonly Dictionary<string, int> _nextVariant = new( StringComparer.OrdinalIgnoreCase );
+
+    /// <summary>The item has a held use (start / loop / end clips), driven by <see cref="Using"/>.</summary>
+    public bool HasHeldUse => HasClip( "useloop" ) || HasClip( "usestart" ) && HasClip( "useend" );
+
     /// <summary>A shell-by-shell reload is running.</summary>
     public bool ShellReloading => _shellReload;
 
@@ -589,6 +613,24 @@ public sealed class WeaponHold : Component
 
     private bool HasClip( string role ) => _actions.TryGetValue( role, out var a ) && !string.IsNullOrEmpty( a.Sequence );
 
+    /// <summary>The action with this turn's clip: an action with variants plays them one after another.</summary>
+    private ActionInfo NextVariant( string role, ActionInfo info )
+    {
+        if ( info == null || info.Variants.Count == 0 )
+        {
+            AttackVariant = 1;
+            return info;
+        }
+        _nextVariant.TryGetValue( role, out var index );
+        var count = info.Variants.Count + 1;
+        index %= count;
+        _nextVariant[role] = index + 1;
+        AttackVariant = index + 1;
+        if ( index == 0 )
+            return info;
+        return new ActionInfo { Role = info.Role, Seconds = 0f, Sequence = info.Variants[index - 1], Trigger = info.Trigger };
+    }
+
     private void StartAction( string role, SkinnedModelRenderer weapon )
     {
         ShellReloadState( role );
@@ -598,6 +640,7 @@ public sealed class WeaponHold : Component
         _leftFrom = _leftApplied;
         _rightFrom = _rightApplied;
         _actions.TryGetValue( role, out var info );
+        info = NextVariant( role, info );
         _duration = PlayWeaponSequence( weapon, info, role == IdleRole, 0f, paused: false );
         BeginOverlay( role, info );
         if ( role != IdleRole )

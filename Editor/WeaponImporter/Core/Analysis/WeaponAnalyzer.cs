@@ -68,6 +68,8 @@ public static class WeaponAnalyzer
         // 0. Analyze the assembled weapon: the idle (or first) clip's first frame, not the bind pose.
         var loaded = source;
         var (reference, referenceFrame) = ReferencePose(source, options.ReferenceClip);
+        // The file's origin, followed through every move below (a viewmodel's eye often sits there).
+        var origin = Vector3.Zero;
         if (reference is not null)
         {
             // First-person clips move the whole weapon around the camera; put the weapon root
@@ -78,11 +80,14 @@ public static class WeaponAnalyzer
             var posed = source.WithReferencePose(reference, referenceFrame);
             var back = XForm.Compose(loaded.Skeleton.RestWorld[bindRoot], posed.Skeleton.RestWorld[bindRoot].Inverse());
             source = posed.Moved(back);
+            origin = back.TransformPoint(origin);
         }
 
         // 1. Find the weapon inside the file (drop arms, backgrounds, helper geometry).
         var sourceArms = FindArmBones(source.Skeleton);
         var sourceTris = WeaponTriangles(source, sourceArms, out var dropped);
+        // Arms holding nothing (fists): the whole file stands in as the "weapon" for measuring.
+        var handsOnly = sourceTris.Length == 0 && sourceArms.Count > 0;
         if (sourceTris.Length == 0)
             sourceTris = Enumerable.Range(0, source.Mesh.TriangleCount).ToArray();
         sourceTris = DropSpareMagazines(source, sourceTris, dropped);
@@ -96,6 +101,7 @@ public static class WeaponAnalyzer
             ? (forced, "set manually")
             : GuessScale(rotatedLength, WeaponClassifier.FromNames(source));
         var asset = MathF.Abs(scale - 1f) < 1e-6f && MathF.Abs(rotation.W) > 0.99999f ? source : source.Transformed(rotation, scale);
+        origin = Vector3.Transform(origin, rotation) * scale;
 
         // 3. Centre the weapon on its own bounds: first-person rigs park weapons far from the
         //    origin (at camera height), which would give the world model a useless pivot.
@@ -126,6 +132,8 @@ public static class WeaponAnalyzer
             ScaleReason = scaleReason,
             RootBone = root,
             ArmBones = armBones,
+            HandsOnly = handsOnly,
+            SourceOrigin = origin - centre,
             WeaponTriangles = weaponTris,
             WeaponBounds = bounds,
             Profile = profile,
@@ -171,7 +179,12 @@ public static class WeaponAnalyzer
         if (!string.IsNullOrEmpty(preferred) && asset.FindClip(preferred) is { } chosen)
             return (chosen, 0);
 
-        var guesses = asset.Clips.Select(c => (Clip: c, Guess: AnimationClassifier.Classify(c.Name))).ToList();
+        // A take's first-frame still (made for items) is often the start of a draw, not a held pose.
+        var guesses = asset.Clips.Where(c => !c.Name.EndsWith(" start pose", StringComparison.Ordinal))
+            .Select(c => (Clip: c, Guess: AnimationClassifier.Classify(c.Name))).ToList();
+        // Rests found inside split takes are held poses too.
+        guesses.AddRange(asset.Clips.Where(c => c.Looping && AnimationClassifier.Classify(c.Name).Role == AnimationRole.Unknown)
+            .Select(c => (Clip: c, Guess: new AnimationGuess(c.Name, AnimationRole.Idle, 0.3f, "a rest"))));
         var candidates = new List<(Clip Clip, int Frame)>();
         void Add(AnimationRole role, bool last)
         {
@@ -411,7 +424,7 @@ public static class WeaponAnalyzer
     private static bool IsWeaponName(string name)
     {
         var tokens = NameTokens.Split(name);
-        return NameTokens.Has(tokens, "weapon", "gun", "wpn", "rifle", "pistol", "shotgun", "smg", "sniper", "launcher", "revolver") || PartNames.Any(p => NameTokens.Has(tokens, p.Aliases));
+        return NameTokens.Has(tokens, "weapon", "gun", "wpn", "rifle", "pistol", "shotgun", "smg", "sniper", "launcher", "revolver") || WeaponClassifier.NamesAType(name) || PartNames.Any(p => NameTokens.Has(tokens, p.Aliases));
     }
 
     private static readonly string[] NonWeaponParts =
@@ -1082,6 +1095,7 @@ public static class WeaponAnalyzer
 
     private static void ClassifyAnimations(WeaponAnalysis a)
     {
+        var firearm = WeaponTypes.IsFirearm(a.Type.Type);
         var mag = a.Part(PartKind.Magazine);
         var bolt = a.Part(PartKind.Slide) ?? a.Part(PartKind.Bolt) ?? a.Part(PartKind.Pump);
         var skeleton = a.Asset.Skeleton;
@@ -1096,10 +1110,93 @@ public static class WeaponAnalyzer
                 boltBone >= 0 ? Travel(clip, boltBone, skeleton) : 0f,
                 a.RootBone >= 0 ? Travel(clip, a.RootBone, skeleton) : 0f,
                 a.Motion.Count == 0 ? 0f : a.Motion.Max(m => m.MaxTranslation));
-            a.Animations.Add(AnimationClassifier.Classify(clip.Name, hint));
+            var guess = AnimationClassifier.Classify(clip.Name, hint);
+            // Parts of a split take carry no telling name: judge them by how the hands move.
+            if (clip.Name.EndsWith(" start pose", StringComparison.Ordinal))
+                guess = guess with { Role = AnimationRole.Unknown, Confidence = 0f, Reason = "still first frame of a take" };
+            else if (guess.Role == AnimationRole.Unknown || (guess.Role == AnimationRole.Idle && guess.Confidence < 0.6f && !clip.Looping))
+            {
+                if (clip.Looping)
+                    guess = guess with { Role = AnimationRole.Idle, Confidence = 0.55f, Reason = "the hands rest" };
+                else if (!firearm && clip.Duration < 2.2f && HandPeakSpeed(a, clip) > 60f)
+                    guess = guess with { Role = AnimationRole.Fire, Confidence = 0.5f, Reason = "a fast swing of the hands" };
+            }
+            a.Animations.Add(guess);
+        }
+        // Roles this kind of weapon doesn't have ("reload" for a syringe): the clip is its use instead.
+        for (var i = 0; i < a.Animations.Count; i++)
+        {
+            var g = a.Animations[i];
+            if (g.Role == AnimationRole.Unknown || AnimationRoles.AppliesTo(g.Role, a.Type.Type))
+                continue;
+            var replacement = a.Type.Type == WeaponType.Item && !a.Asset.FindClip(g.Animation)!.Looping ? AnimationRole.Use
+                : g.Role == AnimationRole.Melee ? AnimationRole.Fire : AnimationRole.Unknown;
+            a.Animations[i] = g with { Role = replacement, Confidence = g.Confidence * 0.8f, Reason = replacement == AnimationRole.Unknown ? g.Reason : $"{g.Reason} (as {AnimationRoles.Label(replacement, a.Type.Type).ToLowerInvariant()})" };
         }
         foreach (var kv in AnimationClassifier.Assign(a.Animations, AnimationPerspective.FirstPerson))
             a.AssignedAnimations[kv.Key] = kv.Value;
+
+        // An item's one action: the longest take that isn't a rest is its use.
+        if (a.Type.Type == WeaponType.Item && !a.AssignedAnimations.ContainsKey(AnimationRole.Use)
+            && a.Asset.Clips.Where(c => !c.Looping && !a.AssignedAnimations.Values.Any(v => v.Animation == c.Name)).OrderByDescending(c => c.Duration).FirstOrDefault() is { Duration: > 0.5f } use)
+            a.AssignedAnimations[AnimationRole.Use] = new AnimationGuess(use.Name, AnimationRole.Use, 0.45f, "the item's longest action");
+
+        // A take holding several actions (draw, drink, holster...): the use is its longest action
+        // part, not the whole take (the rests between actions keep the idle).
+        if (a.Type.Type == WeaponType.Item && a.AssignedAnimations.TryGetValue(AnimationRole.Use, out var takeUse))
+        {
+            var parts = a.Asset.Clips.Where(c => c.Name.StartsWith(takeUse.Animation + " ", StringComparison.Ordinal)
+                && int.TryParse(c.Name[(takeUse.Animation.Length + 1)..], out _)).ToList();
+            if (parts.Count >= 4 && parts.Where(c => !c.Looping).OrderByDescending(c => c.Duration).FirstOrDefault() is { } longest)
+                a.AssignedAnimations[AnimationRole.Use] = new AnimationGuess(longest.Name, AnimationRole.Use, 0.45f, $"the longest action in {takeUse.Animation}");
+        }
+
+        // An item used in one long take (inject, drink): its idle is the pose the use starts from,
+        // not a pause in the middle of the use.
+        if (a.Type.Type == WeaponType.Item && a.AssignedAnimations.TryGetValue(AnimationRole.Idle, out var restIdle) && restIdle.Reason == "the hands rest"
+            && a.AssignedAnimations.TryGetValue(AnimationRole.Use, out var wholeUse) && a.Asset.FindClip(TakeSplitter.StartPoseName(wholeUse.Animation)) is { } startPose)
+            a.AssignedAnimations[AnimationRole.Idle] = new AnimationGuess(startPose.Name, AnimationRole.Idle, 0.5f, "the pose the use starts from");
+
+
+        if (!firearm)
+        {
+            // Melee weapons, fists and items attack with the attack button: punches and slashes are attacks.
+            var attacks = a.Animations.Where(g => g.Role is AnimationRole.Fire or AnimationRole.Melee && g.Confidence >= 0.45f)
+                .OrderByDescending(g => g.Confidence).ThenBy(g => g.Animation, StringComparer.OrdinalIgnoreCase).ToList();
+            if (!a.AssignedAnimations.ContainsKey(AnimationRole.Fire) && attacks.Count > 0)
+                a.AssignedAnimations[AnimationRole.Fire] = attacks[0] with { Role = AnimationRole.Fire };
+            a.AssignedAnimations.Remove(AnimationRole.Melee);
+            if (a.AssignedAnimations.TryGetValue(AnimationRole.Fire, out var main))
+            {
+                var more = attacks.Select(g => g.Animation).Where(n => n != main.Animation).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+                if (more.Count > 0)
+                    a.AnimationVariants[AnimationRole.Fire] = more;
+            }
+        }
+        if (a.AssignedAnimations.TryGetValue(AnimationRole.Attack2, out var heavy))
+        {
+            var more = a.Animations.Where(g => g.Role == AnimationRole.Attack2 && g.Animation != heavy.Animation).Select(g => g.Animation).Distinct().ToList();
+            if (more.Count > 0)
+                a.AnimationVariants[AnimationRole.Attack2] = more;
+        }
+    }
+
+    /// <summary>Fastest any arm bone (else any bone) moves during a clip, inches per second.</summary>
+    private static float HandPeakSpeed(WeaponAnalysis a, Clip clip)
+    {
+        var skeleton = a.Asset.Skeleton;
+        var bones = a.ArmBones.Count > 0 ? a.ArmBones.ToArray() : Enumerable.Range(0, skeleton.Count).ToArray();
+        var peak = 0f;
+        XForm[]? prev = null;
+        foreach (var frame in clip.Frames)
+        {
+            var world = new Pose(frame).ToWorld(skeleton);
+            if (prev is not null)
+                foreach (var b in bones)
+                    peak = MathF.Max(peak, Vector3.Distance(world[b].Pos, prev[b].Pos) * clip.Fps);
+            prev = world;
+        }
+        return peak;
     }
 
     private static float Travel(Clip clip, int bone, Skeleton skeleton)

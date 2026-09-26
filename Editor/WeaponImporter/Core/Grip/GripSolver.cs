@@ -265,6 +265,20 @@ public static class GripSolver
         var (rightReach, leftReach, rightCorr, leftCorr) = Apply(posed, character, weaponInHold, right, left, 1f, 1f);
         var rightBend = WristBend(posed, character.Right);
         var leftBend = left is not null && character.Left is not null ? WristBend(posed, character.Left) : 0f;
+        // Melee weapons and items don't need the second hand: when it can't hold on comfortably
+        // (wrist twisted past its limit, or out of reach) the character holds it one-handed.
+        var oneHanded = false;
+        if (left is not null && !WeaponTypes.IsFirearm(weapon.Type.Type) && (leftBend > MaxWristBend || !leftReach.Reached))
+        {
+            oneHanded = true;
+            left = null;
+            leftQuality = null;
+            leftRequest = null;
+            posed = reference.Clone();
+            (rightReach, leftReach, rightCorr, leftCorr) = Apply(posed, character, weaponInHold, right, null, 1f, 1f);
+            rightBend = WristBend(posed, character.Right);
+            leftBend = 0f;
+        }
 
         var solution = new GripSolution
         {
@@ -287,6 +301,8 @@ public static class GripSolver
         };
         if (!leftReach.Reached && left is not null)
             solution.Notes.Add($"Left hand falls {leftReach.Shortfall:0.0} in short of the support grip.");
+        if (oneHanded)
+            solution.Notes.Add("Held one-handed: the second hand can't hold on comfortably in this hold.");
         if (rightBend > MaxWristBend)
             solution.Notes.Add($"Right wrist bends {rightBend:0}° against the forearm.");
         return solution;
@@ -570,6 +586,8 @@ public static class GripSolver
         WeaponType.Shotgun => new[] { 3, 2 },
         WeaponType.Launcher => new[] { 7, 2 },
         WeaponType.Melee => new[] { 6, 4 },
+        WeaponType.Item => new[] { 4, 1 },
+        WeaponType.Unarmed => new[] { 5 },
         _ => new[] { 2, 1, 3, 4 },
     };
 

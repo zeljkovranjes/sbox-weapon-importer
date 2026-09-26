@@ -18,7 +18,9 @@ public static class WeaponClassifier
         (WeaponType.Shotgun, new[] { "shotgun", "spas", "benelli", "m870", "remington", "nova", "xm1014", "sawedoff", "pump", "doublebarrel", "aa12", "saiga" }),
         (WeaponType.Sniper, new[] { "sniper", "awp", "awm", "barrett", "m82", "l96", "scout", "ssg", "m24", "dragunov", "svd", "kar98", "mosin", "boltaction", "marksman", "dmr", "rifle_sniper" }),
         (WeaponType.Launcher, new[] { "rpg", "launcher", "bazooka", "rocket", "grenadelauncher", "m79", "at4", "javelin", "stinger", "law", "panzerfaust" }),
-        (WeaponType.Melee, new[] { "knife", "sword", "katana", "axe", "hatchet", "bat", "crowbar", "machete", "blade", "melee", "club", "wrench", "dagger", "bayonet", "spear", "mace", "pipe" }),
+        (WeaponType.Melee, new[] { "knife", "sword", "katana", "axe", "hatchet", "bat", "crowbar", "machete", "blade", "melee", "club", "wrench", "dagger", "bayonet", "spear", "mace", "pipe", "balisong", "butterfly", "mariposa", "karambit", "cleaver", "sickle", "scythe", "hammer", "baton", "nightstick", "shovel", "pickaxe", "halberd", "rapier", "saber", "sabre", "scimitar", "tomahawk" }),
+        (WeaponType.Item, new[] { "flashlight", "torch", "lamp", "lantern", "bottle", "flask", "syringe", "injector", "medkit", "bandage", "pills", "phone", "cellphone", "smartphone", "radio", "walkie", "camera", "can", "soda", "beer", "food", "burger", "apple", "key", "keycard", "lighter", "map", "book", "compass", "binocular", "binoculars", "tablet", "detector", "flare", "item", "consumable", "potion", "drink" }),
+        (WeaponType.Unarmed, new[] { "fist", "fists", "unarmed", "punch", "boxing", "barehand", "barehands" }),
         (WeaponType.Rifle, new[] { "rifle", "ak", "ak47", "ak74", "akm", "m4", "m4a1", "m16", "ar15", "ar", "scar", "famas", "aug", "g36", "galil", "hk416", "assault", "carbine", "fal", "m14" }),
     };
 
@@ -44,6 +46,9 @@ public static class WeaponClassifier
             .Where(h => !hits.Any(o => o.Type != h.Type && o.Alias.Length > h.Alias.Length && o.Alias.Contains(h.Alias, StringComparison.Ordinal)));
         return kept.Select(h => h.Type).Distinct();
     }
+
+    /// <summary>Whether a name says what kind of weapon or item it is ("knife", "Flashlight_01", "AK74").</summary>
+    public static bool NamesAType(string text) => NamedTypes(text).Any();
 
     /// <summary>Type from the file, mesh and bone names alone (used before geometry is trusted).</summary>
     public static WeaponType? FromNames(WeaponAsset asset)
@@ -75,10 +80,11 @@ public static class WeaponClassifier
         sources.AddRange(a.Asset.Skeleton.Bones.Where(b => !a.ArmBones.Contains(b.Index)).Select(b => (b.Name, 0.35f)));
         sources.AddRange(a.Asset.Clips.Select(c => (c.Name, 0.25f)));
 
-        // Short aliases ("ar", "ak", "44") must match a whole token.
+        // Short aliases ("ar", "ak", "44") must match a whole token. Item and melee words
+        // ("syringe", "knife") name the object outright, so they outweigh shape guesses.
         foreach (var (text, weight) in sources)
             foreach (var type in NamedTypes(text))
-                Score(type, weight, $"name '{text}'");
+                Score(type, type is WeaponType.Item or WeaponType.Melee or WeaponType.Unarmed ? weight * 2.5f : weight, $"name '{text}'");
 
         // Shape.
         var length = a.Length;
@@ -92,7 +98,15 @@ public static class WeaponClassifier
         var hasScope = a.Part(PartKind.Scope) is not null;
         var hasStock = HasStock(a);
 
-        if (hasCylinder) Score(WeaponType.Revolver, 1.2f, "rotating cylinder");
+        if (a.HandsOnly)
+            Score(WeaponType.Unarmed, 3f, "arms holding nothing");
+        // A mesh named "Cylinder" is often just Blender's primitive; only a separate turning drum is a revolver's.
+        var cylinder = a.Part(PartKind.Cylinder);
+        var realCylinder = hasCylinder && cylinder is not null && cylinder.Meshes.Count > 0 && a.Asset.Mesh.PartNames.Count > 1
+            && cylinder.Meshes.Count < a.Asset.Mesh.PartNames.Count;
+        if (realCylinder) Score(WeaponType.Revolver, 1.2f, "rotating cylinder");
+        // Objects with no firearm parts at all are items (compact) or melee weapons (long, thin).
+        var firearmParts = hasTrigger || hasMag || hasSlide || hasBolt || hasPump || realCylinder;
         if (hasSlide) Score(WeaponType.Pistol, 0.8f, "slide");
         if (hasPump) Score(WeaponType.Shotgun, 1.0f, "pump");
         // Loading shell by shell (start / one shell / end clips) is what shotguns do.
@@ -101,7 +115,7 @@ public static class WeaponClassifier
             Score(WeaponType.Shotgun, 1.2f, "reloads shell by shell");
         if (hasScope && hasBolt && length > 34f) Score(WeaponType.Sniper, 0.8f, "long, scoped, bolt action");
 
-        if (length is > 4f and < 12f && !hasStock) { Score(WeaponType.Pistol, 0.9f, $"compact ({length:0.#} in)"); Score(WeaponType.Revolver, 0.4f, $"compact ({length:0.#} in)"); }
+        if (length is > 4f and < 12f && !hasStock) { Score(WeaponType.Pistol, firearmParts ? 0.9f : 0.3f, $"compact ({length:0.#} in)"); Score(WeaponType.Revolver, firearmParts ? 0.4f : 0.1f, $"compact ({length:0.#} in)"); }
         if (length is >= 11f and < 27f) Score(WeaponType.Smg, 0.6f, $"{length:0.#} in long");
         if (length is >= 25f and < 42f && hasStock) Score(WeaponType.Rifle, 0.8f, $"{length:0.#} in with a stock");
         if (length is >= 25f and < 42f && !hasStock) Score(WeaponType.Rifle, 0.4f, $"{length:0.#} in long");
@@ -113,6 +127,8 @@ public static class WeaponClassifier
             // Solid, thin shapes without firearm parts read as melee weapons.
             var thin = MathF.Max(a.WeaponBounds.Size.Y, a.WeaponBounds.Size.Z) < length * 0.3f;
             Score(WeaponType.Melee, thin ? 0.7f : 0.35f, "no trigger, magazine or reload");
+            if (!firearmParts)
+                Score(WeaponType.Item, length < 16f && !thin ? 0.9f : length < 16f ? 0.5f : 0.2f, "no firearm parts");
         }
         if (hasMag && !hasStock && length < 13f) Score(WeaponType.Pistol, 0.3f, "magazine, no stock");
 

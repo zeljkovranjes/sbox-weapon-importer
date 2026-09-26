@@ -108,7 +108,9 @@ public static partial class WeaponBaker
             var roles = setup.WeaponAnimations.Where( kv => kv.Value.Clip == clip.Clip ).Select( kv => kv.Key ).ToList();
             foreach ( var r in roles )
                 sequenceByRole[r] = clip.Sequence;
-            var events = setup.Events.Where( e => roles.Contains( e.Role ) ).Select( e => (WeaponEvent.EngineName( e.Kind ), e.Time) ).ToList();
+            // A variant carries its role's events too (every slash hits, every shot fires).
+            var eventRoles = roles.Concat( RolesOfVariant( setup, clip.Clip ) ).Distinct().ToList();
+            var events = setup.Events.Where( e => eventRoles.Contains( e.Role ) ).Select( e => (WeaponEvent.EngineName( e.Kind ), e.Time) ).ToList();
             vmdl.Animations.Add( new VmdlAnimation
             {
                 Name = clip.Sequence,
@@ -125,7 +127,7 @@ public static partial class WeaponBaker
         // AnimGraph for the weapon's own sequences (first-person code drives it with the usual parameters).
         if ( exported.Clips.Count > 0 && sequenceByRole.ContainsKey( AnimationRole.Idle ) )
         {
-            var graphClips = sequenceByRole.Select( kv => new Core.Graph.GraphClip( kv.Key, kv.Value, AnimationRoles.Loops( kv.Key ), ActionTiming.Seconds( setup, session.Analysis?.Asset, kv.Key ) ) ).ToList();
+            var graphClips = sequenceByRole.Select( kv => new Core.Graph.GraphClip( kv.Key, kv.Value, AnimationRoles.Loops( kv.Key ), ActionTiming.Seconds( setup, session.Analysis?.Asset, kv.Key ) ) { Variants = VariantSequences( setup, kv.Key ) } ).ToList();
             var graphPath = $"{folder}/{name}.vanmgrph";
             WriteEditable( result, setup, graphPath, Core.Graph.WeaponGraphGenerator.Generate( name, graphClips, null, out _, modelPath ) );
             result.Files.Add( graphPath );
@@ -149,7 +151,8 @@ public static partial class WeaponBaker
                 var roles = setup.WeaponAnimations.Where( kv => kv.Value.Clip == clip.Clip ).Select( kv => kv.Key ).ToList();
                 foreach ( var r in roles )
                     fpSequences[r] = clip.Sequence;
-                var events = setup.Events.Where( e => roles.Contains( e.Role ) ).Select( e => (WeaponEvent.EngineName( e.Kind ), e.Time) ).ToList();
+                var eventRoles = roles.Concat( RolesOfVariant( setup, clip.Clip ) ).Distinct().ToList();
+                var events = setup.Events.Where( e => eventRoles.Contains( e.Role ) ).Select( e => (WeaponEvent.EngineName( e.Kind ), e.Time) ).ToList();
                 fpVmdl.Animations.Add( new VmdlAnimation { Name = clip.Sequence, File = clip.File, Looping = roles.Any( AnimationRoles.Loops ), FrameCount = clip.FrameCount, Fps = clip.Fps, Events = events } );
             }
             foreach ( var (point, p) in new[] { ("muzzle", setup.Muzzle), ("eject", setup.Eject) } )
@@ -157,7 +160,7 @@ public static partial class WeaponBaker
                     fpVmdl.Attachments.Add( new VmdlAttachment( point, EngineNames.Bone( p.Bone ), V.Of( p.Position ) * setup.Scale, V.Q( p.Rotation ) ) );
             if ( fpSequences.ContainsKey( AnimationRole.Idle ) )
             {
-                var fpClips = fpSequences.Select( kv => new Core.Graph.GraphClip( kv.Key, kv.Value, AnimationRoles.Loops( kv.Key ), ActionTiming.Seconds( setup, session.Analysis?.Asset, kv.Key ) ) ).ToList();
+                var fpClips = fpSequences.Select( kv => new Core.Graph.GraphClip( kv.Key, kv.Value, AnimationRoles.Loops( kv.Key ), ActionTiming.Seconds( setup, session.Analysis?.Asset, kv.Key ) ) { Variants = VariantSequences( setup, kv.Key ) } ).ToList();
                 var fpGraph = $"{folder}/{fpName}.vanmgrph";
                 var camera = fp.CameraBone.Length > 0 ? EngineNames.Bone( fp.CameraBone ) : null;
                 WriteEditable( result, setup, fpGraph, Core.Graph.WeaponGraphGenerator.Generate( fpName, fpClips, camera, out _, fpModelPath ) );
@@ -417,6 +420,16 @@ public static partial class WeaponBaker
         return PrefabBuilder.Build( prefabPath, root );
     }
 
+    /// <summary>Roles that play this clip as one of their variants.</summary>
+    private static IEnumerable<AnimationRole> RolesOfVariant( WeaponSetup setup, string clip )
+        => setup.WeaponAnimations.Where( kv => kv.Value.Variants.Contains( clip ) ).Select( kv => kv.Key );
+
+    /// <summary>Sequence names of a role's variant clips.</summary>
+    public static IReadOnlyList<string> VariantSequences( WeaponSetup setup, AnimationRole role )
+        => setup.WeaponAnimations.TryGetValue( role, out var b )
+            ? b.Variants.Where( v => !string.IsNullOrEmpty( v ) && v != b.Clip ).Distinct().Select( v => EngineNames.Sequence( v ) ).ToList()
+            : Array.Empty<string>();
+
     /// <summary>Sequence name the baked model uses for each mapped role.</summary>
     public static Dictionary<AnimationRole, string> SequencesByRole( WeaponSetup setup )
         => setup.WeaponAnimations.Where( kv => !string.IsNullOrEmpty( kv.Value.Clip ) ).ToDictionary( kv => kv.Key, kv => EngineNames.Sequence( kv.Value.Clip ) );
@@ -456,7 +469,10 @@ public static partial class WeaponBaker
             var trigger = AnimationRoles.GraphTrigger( role ) ?? "";
             if ( seq is null && trigger.Length == 0 && role != AnimationRole.Idle && !setup.Contacts.ContainsKey( role ) )
                 continue;
-            actions[role.ToString().ToLowerInvariant()] = new JsonObject { ["seconds"] = Math.Round( MathF.Max( seconds, 0.05f ), 3 ), ["sequence"] = seq ?? "", ["trigger"] = role == AnimationRole.Idle ? "" : trigger };
+            var action = new JsonObject { ["seconds"] = Math.Round( MathF.Max( seconds, 0.05f ), 3 ), ["sequence"] = seq ?? "", ["trigger"] = role == AnimationRole.Idle ? "" : trigger };
+            if ( seq is not null && VariantSequences( setup, role ) is { Count: > 0 } variants )
+                action["variants"] = new JsonArray( variants.Select( v => (JsonNode)v ).ToArray() );
+            actions[role.ToString().ToLowerInvariant()] = action;
         }
 
         // Replacement character animations (upper-body overlay in WeaponHold).

@@ -33,6 +33,24 @@ public enum AnimationRole
     ReloadInsert,
     /// <summary>Shell-by-shell reload, last part (pump, back to idle).</summary>
     ReloadEnd,
+    /// <summary>Secondary / heavy attack (right click: a stab, a heavy swing).</summary>
+    Attack2,
+    /// <summary>Raising the guard (melee, fists).</summary>
+    BlockStart,
+    /// <summary>Holding the guard (loops while blocking).</summary>
+    Block,
+    /// <summary>Lowering the guard.</summary>
+    BlockEnd,
+    /// <summary>Using an item once (drink, inject, eat, apply).</summary>
+    Use,
+    /// <summary>Starting a held use (bringing the item up).</summary>
+    UseStart,
+    /// <summary>Held use (loops while the item is in use).</summary>
+    UseLoop,
+    /// <summary>Finishing a held use.</summary>
+    UseEnd,
+    /// <summary>Throwing the item (grenade, knife, bottle).</summary>
+    Throw,
 }
 
 public static class AnimationRoles
@@ -43,8 +61,34 @@ public static class AnimationRoles
         AnimationRole.Idle, AnimationRole.Fire, AnimationRole.FireEmpty, AnimationRole.Reload,
         AnimationRole.TacticalReload, AnimationRole.EmptyReload, AnimationRole.ReloadStart, AnimationRole.ReloadInsert, AnimationRole.ReloadEnd, AnimationRole.Draw, AnimationRole.Holster,
         AnimationRole.Inspect, AnimationRole.Sprint, AnimationRole.Walk, AnimationRole.Ads, AnimationRole.AdsIdle, AnimationRole.AdsOut, AnimationRole.AdsFire,
-        AnimationRole.Melee, AnimationRole.Bolt, AnimationRole.Jam, AnimationRole.Unjam,
+        AnimationRole.Melee, AnimationRole.Attack2, AnimationRole.BlockStart, AnimationRole.Block, AnimationRole.BlockEnd,
+        AnimationRole.Use, AnimationRole.UseStart, AnimationRole.UseLoop, AnimationRole.UseEnd, AnimationRole.Throw,
+        AnimationRole.Bolt, AnimationRole.Jam, AnimationRole.Unjam,
     };
+
+    /// <summary>Roles a weapon of this kind can use (firearm roles are hidden for items, and the other way round).</summary>
+    public static bool AppliesTo(AnimationRole role, Weapon.WeaponType type)
+    {
+        var firearm = Weapon.WeaponTypes.IsFirearm(type);
+        var custom = type == Weapon.WeaponType.Custom;
+        return role switch
+        {
+            AnimationRole.FireEmpty or AnimationRole.Reload or AnimationRole.TacticalReload or AnimationRole.EmptyReload
+                or AnimationRole.ReloadStart or AnimationRole.ReloadInsert or AnimationRole.ReloadEnd or AnimationRole.AdsFire
+                or AnimationRole.Bolt or AnimationRole.Jam or AnimationRole.Unjam or AnimationRole.Melee => firearm,
+            AnimationRole.BlockStart or AnimationRole.Block or AnimationRole.BlockEnd or AnimationRole.Attack2 => !firearm || custom,
+            AnimationRole.Use or AnimationRole.UseStart or AnimationRole.UseLoop or AnimationRole.UseEnd
+                => type is Weapon.WeaponType.Item or Weapon.WeaponType.Unarmed || custom,
+            _ => true,
+        };
+    }
+
+    /// <summary>A role's name for a weapon type: attacks are "Attack" for melee weapons, fists and items.</summary>
+    public static string Label(AnimationRole role, Weapon.WeaponType type)
+        => role == AnimationRole.Fire && !Weapon.WeaponTypes.IsFirearm(type) ? "Attack" : Label(role);
+
+    /// <summary>Roles that may hold several clips played in turn (left and right punches, a combo of slashes).</summary>
+    public static bool HasVariants(AnimationRole role) => role is AnimationRole.Fire or AnimationRole.Melee or AnimationRole.Attack2;
 
     /// <summary>Roles every firearm should have; missing ones are reported by validation.</summary>
     public static readonly AnimationRole[] Required = { AnimationRole.Fire, AnimationRole.Reload };
@@ -62,6 +106,12 @@ public static class AnimationRoles
         AnimationRole.ReloadEnd => "Reload End",
         AnimationRole.AdsFire => "ADS Fire",
         AnimationRole.Bolt => "Bolt / Charge",
+        AnimationRole.Attack2 => "Heavy Attack",
+        AnimationRole.BlockStart => "Block Start",
+        AnimationRole.BlockEnd => "Block End",
+        AnimationRole.UseStart => "Use Start",
+        AnimationRole.UseLoop => "Use Loop",
+        AnimationRole.UseEnd => "Use End",
         _ => role.ToString(),
     };
 
@@ -74,7 +124,7 @@ public static class AnimationRoles
         => role is AnimationRole.ReloadStart or AnimationRole.ReloadInsert or AnimationRole.ReloadEnd;
 
     public static bool Loops(AnimationRole role)
-        => role is AnimationRole.Idle or AnimationRole.Sprint or AnimationRole.Walk or AnimationRole.AdsIdle;
+        => role is AnimationRole.Idle or AnimationRole.Sprint or AnimationRole.Walk or AnimationRole.AdsIdle or AnimationRole.Block or AnimationRole.UseLoop;
 
     /// <summary>Role the given one falls back to when it has no clip (empty reload plays reload).</summary>
     public static AnimationRole? Fallback(AnimationRole role) => role switch

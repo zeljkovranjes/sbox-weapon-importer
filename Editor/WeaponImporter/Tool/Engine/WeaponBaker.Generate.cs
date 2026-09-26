@@ -64,7 +64,7 @@ public static partial class WeaponBaker
         Materials( dmx, result.MaterialRemaps );
 
         // Clips the setup uses (each only once).
-        var used = setup.WeaponAnimations.Values.Select( b => b.Clip ).Where( c => !string.IsNullOrEmpty( c ) ).Distinct().ToList();
+        var used = setup.WeaponAnimations.Values.SelectMany( b => b.Variants.Prepend( b.Clip ) ).Where( c => !string.IsNullOrEmpty( c ) ).Distinct().ToList();
         foreach ( var clipName in used )
         {
             var clip = rig.Asset.FindClip( clipName );

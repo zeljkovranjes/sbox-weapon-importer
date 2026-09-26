@@ -95,6 +95,12 @@ public sealed class WeaponSetup
 
     public const string NoArms = "none";
 
+    /// <summary>
+    /// Takes split into actions by hand: take name -> the frames where each action starts (0 is
+    /// implied). An empty list keeps the take whole. Takes not listed are split automatically.
+    /// </summary>
+    public Dictionary<string, List<int>> TakeSplits { get; set; } = new();
+
     /// <summary>Largest texture side written by the bake (bigger images are scaled down); 0 keeps them as they are.</summary>
     public int MaxTextureSize { get; set; } = 2048;
 
@@ -269,6 +275,9 @@ public sealed class HandPoseSetup
 public sealed class AnimationBinding
 {
     public string Clip { get; set; } = "";
+
+    /// <summary>More clips played in turn with <see cref="Clip"/> (left and right punches, a combo of slashes).</summary>
+    public List<string> Variants { get; set; } = new();
     public float Confidence { get; set; }
     public bool Manual { get; set; }
 }

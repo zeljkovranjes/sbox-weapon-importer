@@ -119,7 +119,12 @@ public sealed partial class WeaponViewport
 		_fpInverseRest = new XForm[skeleton.Count];
 		for ( var i = 0; i < skeleton.Count; i++ )
 			_fpInverseRest[i] = skeleton.RestWorld[i].Inverse();
-		_fpCameraBone = WeaponImporter.Core.Rig.ViewmodelParts.CameraBone( skeleton );
+		_fpCameraBone = WeaponImporter.Core.Generation.FirstPersonRig.FindCamera( analysis );
+		// Without a camera bone, the eye the baked viewmodel uses (the file's origin, the character's eyes...).
+		var rig = analysis.ArmBones.Count > 0 ? WeaponImporter.Core.Generation.FirstPersonRig.Build( analysis ) : null;
+		_fpRigEye = _fpCameraBone < 0 ? rig?.Eye.ToEngine() : null;
+		// The camera's viewing axes as the baked viewmodel uses them.
+		_fpCameraAxes = rig is not null && _fpCameraBone >= 0 ? rig.CameraAxes.ToEngine() : null;
 		_fpFrame = -1;
 		_fpClip = null;
 		_fpWorld = null;
@@ -197,6 +202,8 @@ public sealed partial class WeaponViewport
 	}
 
 	private Transform? _fpEye;
+	private Transform? _fpRigEye;
+	private Rotation? _fpCameraAxes;
 
 	private void UpdateFirstPersonCamera()
 	{
@@ -214,6 +221,14 @@ public sealed partial class WeaponViewport
 			// camera's axes: forward is the bone axis pointing most at the weapon, up the one
 			// closest to world up. Aim at the weapon when no axis fits.
 			eye = cameraBone.Position;
+			if ( _fpCameraAxes is { } fix )
+			{
+				// The baked viewmodel's view: the camera bone turned by its axis fix.
+				var view = cameraBone.Rotation * fix;
+				look = eye + view.Forward * 10f;
+				up = view.Up;
+				goto placed;
+			}
 			var toWeapon = (center - eye).Normal;
 			var axes = new[] { Vector3.Forward, Vector3.Backward, Vector3.Left, Vector3.Right, Vector3.Up, Vector3.Down }
 				.Select( a => cameraBone.Rotation * a ).ToArray();
@@ -228,6 +243,11 @@ public sealed partial class WeaponViewport
 				look = center;
 			}
 		}
+		else if ( _fpRigEye is { } rigEye )
+		{
+			eye = rigEye.Position;
+			look = eye + rigEye.Rotation.Forward * 10f;
+		}
 		else
 		{
 			// No camera in the file (weapon only): a steady three-quarter view from behind the
@@ -238,6 +258,7 @@ public sealed partial class WeaponViewport
 			eye = center + dir * distance;
 			look = center;
 		}
+		placed:
 		Camera.FieldOfView = 60f;
 		Camera.ZNear = _fpEye is null ? 0.5f : 2f; // clip the arm stubs right at a rig camera
 		Camera.WorldPosition = eye;

@@ -36,6 +36,12 @@ public sealed class WeaponAsset
 
     public IReadOnlyList<SourceAttachment> Attachments { get; init; } = Array.Empty<SourceAttachment>();
 
+    /// <summary>
+    /// Camera objects of the file kept as bones, with the local axes they look along and hold
+    /// up (FBX cameras look down their +X, up +Y, carried through the axis conversion).
+    /// </summary>
+    public IReadOnlyDictionary<string, (Vector3 Forward, Vector3 Up)> CameraViews { get; init; } = new Dictionary<string, (Vector3 Forward, Vector3 Up)>();
+
     /// <summary>Import notes (unit fixes, skipped meshes...).</summary>
     public List<string> Notes { get; } = new();
 
@@ -111,7 +117,7 @@ public sealed class WeaponAsset
             _ => rotation);
 
         var attachments = Attachments.Select(a => a with { Local = new XForm(a.Local.Pos * scale, a.Local.Rot) }).ToList();
-        var copy = new WeaponAsset { Name = Name, Kind = Kind, SourcePath = SourcePath, Skeleton = skeleton, Mesh = mesh, Clips = clips, Attachments = attachments };
+        var copy = new WeaponAsset { CameraViews = CameraViews, Name = Name, Kind = Kind, SourcePath = SourcePath, Skeleton = skeleton, Mesh = mesh, Clips = clips, Attachments = attachments };
         copy.Notes.AddRange(Notes);
         return copy;
     }
@@ -150,7 +156,7 @@ public sealed class WeaponAsset
             var bone = Mesh.VertexBone[v];
             return bone >= 0 && bone < delta.Length ? delta[bone].Rot : Quaternion.Identity;
         });
-        var copy = new WeaponAsset { Name = Name, Kind = Kind, SourcePath = SourcePath, Skeleton = skeleton, Mesh = mesh, Clips = Clips, Attachments = Attachments };
+        var copy = new WeaponAsset { CameraViews = CameraViews, Name = Name, Kind = Kind, SourcePath = SourcePath, Skeleton = skeleton, Mesh = mesh, Clips = Clips, Attachments = Attachments };
         copy.Notes.AddRange(Notes);
         return copy;
     }
@@ -176,7 +182,7 @@ public sealed class WeaponAsset
         }).ToList(), c.NativeFps)).ToList();
         var moveRot = MathQ.Normalize(move.Rot);
         var mesh = Mesh.WithVertices(Mesh.Positions.Select(move.TransformPoint).ToArray(), Mesh.VertexBone.Select(b => b >= 0 ? map[b] : b).ToArray(), _ => moveRot);
-        var copy = new WeaponAsset { Name = Name, Kind = Kind, SourcePath = SourcePath, Skeleton = skeleton, Mesh = mesh, Clips = clips, Attachments = Attachments };
+        var copy = new WeaponAsset { CameraViews = CameraViews, Name = Name, Kind = Kind, SourcePath = SourcePath, Skeleton = skeleton, Mesh = mesh, Clips = clips, Attachments = Attachments };
         copy.Notes.AddRange(Notes);
         return copy;
     }

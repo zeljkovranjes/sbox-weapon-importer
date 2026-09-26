@@ -51,9 +51,9 @@ public static class FbxTokenizer
     public static FbxNode Parse(byte[] data)
     {
         ArgumentNullException.ThrowIfNull(data);
-        if (HasBinaryMagic(data))
-            return ParseBinary(data);
-        return ParseAscii(data);
+        var root = HasBinaryMagic(data) ? ParseBinary(data) : ParseAscii(data);
+        // FBX 6 (2006-2010) documents are brought into the FBX 7 layout everything else reads.
+        return FbxLegacy.IsLegacy(root) ? FbxLegacy.Upgrade(root) : root;
     }
 
     // =====================================================================
@@ -71,11 +71,6 @@ public static class FbxTokenizer
     {
         int pos = Magic.Length;
         uint version = ReadU32(data, ref pos);
-        // FBX 6.x stores transforms in Properties60 blocks with a different property layout;
-        // parsing it with 7.x semantics silently yields identity transforms. Reject it.
-        if (version < 7000)
-            throw new FormatException(
-                $"FBX 6.x (Properties60) is not supported (file declares version {version}); re-export as FBX 7.x (2011 or newer).");
         // Version >= 7500 widened the three node-header fields from u32 to u64.
         bool wide = version >= 7500;
 

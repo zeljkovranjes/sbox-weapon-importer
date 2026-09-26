@@ -43,7 +43,7 @@ public static class MaterialFallbacks
 
         var mesh = asset.Mesh;
         var newMesh = new TriMesh(mesh.Positions, mesh.Indices, mesh.VertexBone, mesh.TrianglePart, mesh.PartNames, mesh.CornerNormals, mesh.CornerUVs, mesh.TriangleMaterial, result);
-        var copy = new WeaponAsset { Name = asset.Name, Kind = asset.Kind, SourcePath = asset.SourcePath, Skeleton = asset.Skeleton, Mesh = newMesh, Clips = asset.Clips, Attachments = asset.Attachments };
+        var copy = new WeaponAsset { CameraViews = asset.CameraViews, Name = asset.Name, Kind = asset.Kind, SourcePath = asset.SourcePath, Skeleton = asset.Skeleton, Mesh = newMesh, Clips = asset.Clips, Attachments = asset.Attachments };
         copy.Notes.AddRange(asset.Notes);
         copy.Notes.Add(mtl is not null && fromMtl.Count > 0 ? $"Materials completed from {Path.GetFileName(mtl)}." : "The file has no material colours; colours were chosen from material names.");
         return copy;

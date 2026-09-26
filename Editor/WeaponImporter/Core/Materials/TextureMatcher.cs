@@ -171,7 +171,7 @@ public static class TextureMatcher
         }
         var mesh = asset.Mesh;
         var newMesh = new TriMesh(mesh.Positions, mesh.Indices, mesh.VertexBone, mesh.TrianglePart, mesh.PartNames, mesh.CornerNormals, mesh.CornerUVs, mesh.TriangleMaterial, materials);
-        var copy = new WeaponAsset { Name = asset.Name, Kind = asset.Kind, SourcePath = asset.SourcePath, Skeleton = asset.Skeleton, Mesh = newMesh, Clips = asset.Clips, Attachments = asset.Attachments };
+        var copy = new WeaponAsset { CameraViews = asset.CameraViews, Name = asset.Name, Kind = asset.Kind, SourcePath = asset.SourcePath, Skeleton = asset.Skeleton, Mesh = newMesh, Clips = asset.Clips, Attachments = asset.Attachments };
         copy.Notes.AddRange(asset.Notes);
         copy.Notes.Add($"Attached {list.Count} texture{(list.Count == 1 ? "" : "s")} found beside the model.");
         return copy;

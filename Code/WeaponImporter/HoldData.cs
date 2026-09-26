@@ -43,6 +43,9 @@ public sealed class ActionInfo
 
     /// <summary>Character animgraph bool whose rising edge starts the action ("" = code only).</summary>
     public string Trigger { get; set; } = "";
+
+    /// <summary>More weapon sequences played in turn with <see cref="Sequence"/> (left and right punches, a combo of slashes).</summary>
+    public List<string> Variants { get; set; } = new();
 }
 
 /// <summary>A baked finger bone local rotation.</summary>
@@ -184,6 +187,10 @@ public static class HoldData
                     Sequence = ReadString( prop.Value, "sequence" ),
                     Trigger = ReadString( prop.Value, "trigger" ),
                 };
+                if ( prop.Value.TryGetProperty( "variants", out var variants ) && variants.ValueKind == JsonValueKind.Array )
+                    foreach ( var v in variants.EnumerateArray() )
+                        if ( v.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace( v.GetString() ) )
+                            info.Variants.Add( v.GetString() );
                 into[role] = info;
             }
 

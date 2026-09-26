@@ -76,6 +76,12 @@ public sealed class WeaponAnalysis
     public string ScaleReason { get; init; } = "";
     public required int RootBone { get; init; }
     public required IReadOnlySet<int> ArmBones { get; init; }
+
+    /// <summary>The source file's origin in canonical space (first-person exports often put the eye there).</summary>
+    public Vector3 SourceOrigin { get; init; }
+
+    /// <summary>The file is first-person arms holding nothing (fists, bare hands).</summary>
+    public bool HandsOnly { get; init; }
     public required int[] WeaponTriangles { get; init; }
     public required Bounds WeaponBounds { get; init; }
     public required ShapeProfile Profile { get; init; }
@@ -98,6 +104,9 @@ public sealed class WeaponAnalysis
     public List<GripCandidate> SupportAreas { get; } = new();
     public List<AnimationGuess> Animations { get; } = new();
     public Dictionary<AnimationRole, AnimationGuess> AssignedAnimations { get; } = new();
+
+    /// <summary>More clips for a role that plays one of several in turn (left and right punches, slashes).</summary>
+    public Dictionary<AnimationRole, List<string>> AnimationVariants { get; } = new();
     public List<string> Notes { get; } = new();
 
     public float Length => WeaponBounds.Size.X;

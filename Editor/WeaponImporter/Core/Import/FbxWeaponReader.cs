@@ -293,10 +293,34 @@ public static class FbxWeaponReader
             Mesh = new TriMesh(positions.ToArray(), indices.ToArray(), vertexBone.ToArray(), triPart.ToArray(), partNames,
                 normalsArray, anyUVs ? cornerUVs.ToArray() : null, triMaterial.ToArray(), materials),
             Clips = clips,
+            CameraViews = scene.Models.Where(m => m.SubClass == "Camera" && skeleton.IndexOf(m.Name) >= 0)
+                .GroupBy(m => m.Name).ToDictionary(g => g.Key, g => CameraView(g.First(), skeleton, conversion)),
         };
         asset.Notes.AddRange(notes);
         asset.Notes.AddRange(materialReader.Notes.Distinct().Take(20));
         return asset;
+    }
+
+    /// <summary>
+    /// The local axes a camera looks along and holds up. FBX 7 cameras look down their +X with
+    /// +Y up; FBX 6 cameras aim at a LookAt point with an Up vector, in the scene's space.
+    /// </summary>
+    private static (Vector3 Forward, Vector3 Up) CameraView(FbxObject camera, Skeleton skeleton, SpaceConversion conversion)
+    {
+        var node = camera.Node;
+        if (node.Child("LookAt") is { Properties.Count: >= 3 } lookAt && node.Child("Position") is { Properties.Count: >= 3 } position)
+        {
+            Vector3 V(FbxNode n) => new((float)n.Prop<double>(0), (float)n.Prop<double>(1), (float)n.Prop<double>(2));
+            var up = node.Child("Up") is { Properties.Count: >= 3 } u ? V(u) : Vector3.UnitY;
+            var dir = V(lookAt) - V(position);
+            if (dir.LengthSquared() > 1e-8f)
+            {
+                var toLocal = Quaternion.Conjugate(skeleton.RestWorld[skeleton.IndexOf(camera.Name)].Rot);
+                return (Vector3.Normalize(Vector3.Transform(conversion.Direction(Vector3.Normalize(dir)), toLocal)),
+                        Vector3.Normalize(Vector3.Transform(conversion.Direction(up), toLocal)));
+            }
+        }
+        return (conversion.Direction(Vector3.UnitX), conversion.Direction(Vector3.UnitY));
     }
 
     /// <summary>Row-vector normal matrix: inverse transpose of the linear part (falls back to the matrix itself when singular).</summary>

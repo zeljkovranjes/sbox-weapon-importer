@@ -7,7 +7,8 @@ namespace WeaponImporter.Core.Weapon;
 
 using Vector3 = System.Numerics.Vector3;
 
-public enum WeaponType { Pistol, Revolver, Rifle, Smg, Shotgun, Sniper, Launcher, Melee, Custom }
+/// <summary>What is held: firearms, melee weapons, items (flashlight, bottle, syringe, phone...) or bare fists.</summary>
+public enum WeaponType { Pistol, Revolver, Rifle, Smg, Shotgun, Sniper, Launcher, Melee, Item, Unarmed, Custom }
 
 public enum PartKind { Magazine, Slide, Bolt, ChargingHandle, Trigger, Hammer, Cylinder, Pump, Foregrip, Stock, Scope, Barrel }
 
@@ -55,10 +56,11 @@ public static class WeaponTypes
     {
         WeaponType.Smg => "SMG",
         WeaponType.Sniper => "Sniper Rifle",
+        WeaponType.Unarmed => "Fists",
         _ => type.ToString(),
     };
 
-    public static bool IsFirearm(WeaponType type) => type is not WeaponType.Melee;
+    public static bool IsFirearm(WeaponType type) => type is not (WeaponType.Melee or WeaponType.Item or WeaponType.Unarmed);
 
     /// <summary>Whether the support hand is expected on the weapon by default.</summary>
     public static bool TwoHanded(WeaponType type) => type is WeaponType.Rifle or WeaponType.Smg or WeaponType.Shotgun
@@ -72,6 +74,8 @@ public static class WeaponTypes
         WeaponType.Shotgun => 3,
         WeaponType.Melee => 6,
         WeaponType.Launcher => 7,
+        WeaponType.Item => 4,
+        WeaponType.Unarmed => 5,
         _ => 2,
     };
 
@@ -85,7 +89,9 @@ public static class WeaponTypes
         WeaponType.Shotgun => (26f, 50f),
         WeaponType.Sniper => (36f, 60f),
         WeaponType.Launcher => (28f, 70f),
-        WeaponType.Melee => (6f, 60f),
+        WeaponType.Melee => (3f, 72f),
+        WeaponType.Item => (1f, 48f),
+        WeaponType.Unarmed => (0f, 200f),
         _ => (4f, 80f),
     };
 

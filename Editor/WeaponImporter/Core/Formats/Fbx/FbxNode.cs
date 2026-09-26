@@ -75,7 +75,7 @@ public sealed class FbxNode
     }
 
     /// <summary>Property <paramref name="i"/> as a double array (converts f/l/i/b arrays).</summary>
-    public double[] AsDoubleArray(int i) => RawProp(i) switch
+    public double[] AsDoubleArray(int i) => i == Properties.Count && i == 0 ? Array.Empty<double>() : RawProp(i) switch
     {
         double[] d => d,
         float[] f => Array.ConvertAll(f, x => (double)x),
@@ -83,11 +83,12 @@ public sealed class FbxNode
         int[] n => Array.ConvertAll(n, x => (double)x),
         byte[] b => Array.ConvertAll(b, x => (double)x),
         bool[] o => Array.ConvertAll(o, x => x ? 1.0 : 0.0),
+        _ when ScalarRun(i) is { } run => Array.ConvertAll(run, x => x),
         var v => throw TypeError(i, v, "double[]"),
     };
 
     /// <summary>Property <paramref name="i"/> as a float array (converts d/l/i/b arrays).</summary>
-    public float[] AsFloatArray(int i) => RawProp(i) switch
+    public float[] AsFloatArray(int i) => i == Properties.Count && i == 0 ? Array.Empty<float>() : RawProp(i) switch
     {
         float[] f => f,
         double[] d => Array.ConvertAll(d, x => (float)x),
@@ -95,11 +96,12 @@ public sealed class FbxNode
         int[] n => Array.ConvertAll(n, x => (float)x),
         byte[] b => Array.ConvertAll(b, x => (float)x),
         bool[] o => Array.ConvertAll(o, x => x ? 1f : 0f),
+        _ when ScalarRun(i) is { } run => Array.ConvertAll(run, x => (float)x),
         var v => throw TypeError(i, v, "float[]"),
     };
 
     /// <summary>Property <paramref name="i"/> as a long array (converts i/b; d/f if integral).</summary>
-    public long[] AsLongArray(int i) => RawProp(i) switch
+    public long[] AsLongArray(int i) => i == Properties.Count && i == 0 ? Array.Empty<long>() : RawProp(i) switch
     {
         long[] l => l,
         int[] n => Array.ConvertAll(n, x => (long)x),
@@ -107,11 +109,12 @@ public sealed class FbxNode
         bool[] o => Array.ConvertAll(o, x => x ? 1L : 0L),
         double[] d => Array.ConvertAll(d, x => checked((long)x)),
         float[] f => Array.ConvertAll(f, x => checked((long)x)),
+        _ when ScalarRun(i) is { } run => Array.ConvertAll(run, x => checked((long)x)),
         var v => throw TypeError(i, v, "long[]"),
     };
 
     /// <summary>Property <paramref name="i"/> as an int array (converts b; l/d/f narrowing-checked).</summary>
-    public int[] AsIntArray(int i) => RawProp(i) switch
+    public int[] AsIntArray(int i) => i == Properties.Count && i == 0 ? Array.Empty<int>() : RawProp(i) switch
     {
         int[] n => n,
         long[] l => Array.ConvertAll(l, x => checked((int)x)),
@@ -119,6 +122,7 @@ public sealed class FbxNode
         bool[] o => Array.ConvertAll(o, x => x ? 1 : 0),
         double[] d => Array.ConvertAll(d, x => checked((int)x)),
         float[] f => Array.ConvertAll(f, x => checked((int)x)),
+        _ when ScalarRun(i) is { } run => Array.ConvertAll(run, x => checked((int)x)),
         var v => throw TypeError(i, v, "int[]"),
     };
 
@@ -162,6 +166,31 @@ public sealed class FbxNode
         typeof(int), typeof(uint), typeof(long), typeof(ulong),
         typeof(float), typeof(double), typeof(char),
     };
+
+    /// <summary>
+    /// (An FBX 6 list with no values at all, e.g. a skin cluster without weights, reads as empty.)
+    /// FBX 6 ASCII writes arrays as plain comma lists ("Matrix: 1,0,0,..."), which parse as one
+    /// scalar property per value: the numbers from <paramref name="i"/> to the end, or null.
+    /// </summary>
+    private double[]? ScalarRun(int i)
+    {
+        if (i < 0 || i >= Properties.Count)
+            return null;
+        var run = new double[Properties.Count - i];
+        for (var k = i; k < Properties.Count; k++)
+        {
+            switch (Properties[k])
+            {
+                case double dv: run[k - i] = dv; break;
+                case float fv: run[k - i] = fv; break;
+                case long lv: run[k - i] = lv; break;
+                case int iv: run[k - i] = iv; break;
+                case short sv: run[k - i] = sv; break;
+                default: return null;
+            }
+        }
+        return run;
+    }
 
     private object RawProp(int i)
     {

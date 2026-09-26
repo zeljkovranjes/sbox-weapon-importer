@@ -121,7 +121,7 @@ public static class AnimationFiles
         }
         if (used.Count == 0)
             return asset;
-        var copy = new WeaponAsset { Name = asset.Name, Kind = asset.Kind, SourcePath = asset.SourcePath, Skeleton = asset.Skeleton, Mesh = asset.Mesh, Clips = clips, Attachments = asset.Attachments };
+        var copy = new WeaponAsset { CameraViews = asset.CameraViews, Name = asset.Name, Kind = asset.Kind, SourcePath = asset.SourcePath, Skeleton = asset.Skeleton, Mesh = asset.Mesh, Clips = clips, Attachments = asset.Attachments };
         copy.Notes.AddRange(asset.Notes);
         var folders = used.Select(u => Path.GetDirectoryName(u) is { Length: > 0 } d ? d + Path.DirectorySeparatorChar : "").Distinct().ToList();
         copy.Notes.Add($"{clips.Count - asset.Clips.Count} animations loaded from {used.Count} separate file{(used.Count == 1 ? "" : "s")}{(folders.Count == 1 && folders[0].Length > 0 ? $" in {folders[0]}" : "")}.");

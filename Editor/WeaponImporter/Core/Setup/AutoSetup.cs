@@ -61,7 +61,12 @@ public static class AutoSetup
             if (s.WeaponAnimations.TryGetValue(role, out var existing) && existing.Manual)
                 continue;
             if (a.AssignedAnimations.TryGetValue(role, out var guess))
-                s.WeaponAnimations[role] = new AnimationBinding { Clip = guess.Animation, Confidence = guess.Confidence };
+                s.WeaponAnimations[role] = new AnimationBinding
+                {
+                    Clip = guess.Animation,
+                    Confidence = guess.Confidence,
+                    Variants = a.AnimationVariants.TryGetValue(role, out var more) ? more.ToList() : new List<string>(),
+                };
             else
                 s.WeaponAnimations.Remove(role);
         }

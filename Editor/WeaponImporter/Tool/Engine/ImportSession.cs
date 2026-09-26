@@ -124,6 +124,13 @@ public sealed class ImportSession : IDisposable
                 asset.Notes.Add( $"{System.IO.Path.GetFileName( armsPath )} has no animations for this weapon; imported without first-person arms." );
             }
         }
+        // Takes that hold several actions on one timeline become one clip per action.
+        var splitChoices = previous?.TakeSplits ?? new Dictionary<string, List<int>>();
+        var splitSource = asset;
+        var (split, parts, splittable) = await Task.Run( () => SplitTakes( splitSource, splitChoices ), cancel );
+        asset = split;
+        TakeParts = parts;
+        SplittableTakes = splittable;
         await EditorThread.SwitchToMainThread();
         SourceAsset = asset;
         var options = previous is { OrientationManual: true } ? new AnalyzeOptions { Rotation = previous.ModelRotationQ, Scale = previous.Scale, ReferenceClip = previous.ReferenceClip } : new AnalyzeOptions();
@@ -150,6 +157,43 @@ public sealed class ImportSession : IDisposable
     }
 
     /// <summary>Re-runs the analysis with changed orientation/scale/reference options, keeping manual choices.</summary>
+    /// <summary>Takes split into actions (automatically or by the user's split frames), with their parts.</summary>
+    public IReadOnlyDictionary<string, List<TakePart>> TakeParts { get; private set; } = new Dictionary<string, List<TakePart>>();
+
+    /// <summary>Takes that could be split, whether or not they are (for the Animations page).</summary>
+    public IReadOnlyList<string> SplittableTakes { get; private set; } = Array.Empty<string>();
+
+    private static (WeaponAsset Asset, Dictionary<string, List<TakePart>> Parts, List<string> Splittable) SplitTakes( WeaponAsset asset, IReadOnlyDictionary<string, List<int>> choices )
+    {
+        var parts = new Dictionary<string, List<TakePart>>( StringComparer.OrdinalIgnoreCase );
+        var splittable = new List<string>();
+        foreach ( var clip in asset.Clips )
+        {
+            if ( choices.ContainsKey( clip.Name ) || TakeSplitter.Candidate( asset, clip ) )
+                splittable.Add( clip.Name );
+            if ( choices.TryGetValue( clip.Name, out var starts ) )
+            {
+                if ( starts.Count > 0 )
+                    parts[clip.Name] = TakeSplitter.FromStarts( clip, starts );
+            }
+            else if ( TakeSplitter.Candidate( asset, clip ) && TakeSplitter.Parts( asset.Skeleton, clip ) is { Count: >= 2 } auto )
+            {
+                parts[clip.Name] = auto;
+            }
+        }
+        return (TakeSplitter.Apply( asset, parts ), parts, splittable);
+    }
+
+    /// <summary>Splits a take at the given frames (empty keeps it whole; null goes back to automatic).</summary>
+    public Task SetTakeSplitsAsync( string take, List<int> starts, IProgress<string> progress = null, CancellationToken cancel = default )
+    {
+        if ( starts is null )
+            Setup.TakeSplits.Remove( take );
+        else
+            Setup.TakeSplits[take] = starts.Distinct().OrderBy( s => s ).ToList();
+        return ReloadAsync( progress, cancel, Setup );
+    }
+
     /// <summary>How the weapon was put in separate first-person arms; null when it wasn't.</summary>
     public ArmsFit ArmsFit { get; private set; }
 

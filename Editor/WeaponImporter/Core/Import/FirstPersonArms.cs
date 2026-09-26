@@ -265,7 +265,7 @@ public static class FirstPersonArms
             clips.Add(new Clip(armClip.Name, armClip.Fps, armClip.Looping, frames, armClip.NativeFps));
         }
 
-        var asset = new WeaponAsset { Name = weapon.Name, Kind = weapon.Kind, SourcePath = weapon.SourcePath, Skeleton = skeleton, Mesh = mesh, Clips = clips, Attachments = weapon.Attachments };
+        var asset = new WeaponAsset { CameraViews = arms.CameraViews, Name = weapon.Name, Kind = weapon.Kind, SourcePath = weapon.SourcePath, Skeleton = skeleton, Mesh = mesh, Clips = clips, Attachments = weapon.Attachments };
         asset.Notes.AddRange(weapon.Notes);
         return asset;
     }

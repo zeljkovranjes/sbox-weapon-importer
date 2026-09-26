@@ -18,9 +18,10 @@ public sealed class AnimationsStep : StepPanel
 	protected override string StructureKey()
 	{
 		var s = C.Setup;
-		var weapon = string.Join( ",", s.WeaponAnimations.OrderBy( kv => kv.Key ).Select( kv => $"{kv.Key}={kv.Value.Clip}:{kv.Value.Manual}" ) );
+		var weapon = string.Join( ",", s.WeaponAnimations.OrderBy( kv => kv.Key ).Select( kv => $"{kv.Key}={kv.Value.Clip}:{kv.Value.Manual}:{string.Join( "+", kv.Value.Variants )}" ) ) + s.Type;
 		var third = string.Join( ",", s.ThirdPerson.OrderBy( kv => kv.Key ).Select( kv => $"{kv.Key}={kv.Value.Source}:{kv.Value.Sequence}" ) );
-		return $"{weapon}|{third}|{C.BakedModelPath is null}|{C.Analysis.Asset.Clips.Count}";
+		var splits = string.Join( ",", C.Session.TakeParts.Select( kv => $"{kv.Key}:{kv.Value.Count}" ) ) + string.Join( ",", s.TakeSplits.Select( kv => $"{kv.Key}={string.Join( "/", kv.Value )}" ) );
+		return $"{weapon}|{third}|{C.BakedModelPath is null}|{C.Analysis.Asset.Clips.Count}|{splits}";
 	}
 
 	protected override void Build()
@@ -47,12 +48,62 @@ public sealed class AnimationsStep : StepPanel
 
 		foreach ( var role in AnimationRoles.All )
 		{
+			// Only the actions this kind of weapon has (no reloads for a knife, no block for a rifle),
+			// plus any role that already has a clip.
+			if ( !AnimationRoles.AppliesTo( role, s.Type ) && !s.WeaponAnimations.ContainsKey( role ) )
+				continue;
 			var row = card.Layout.Add( new RoleRow( card, C, role ) );
 			BuildRow( row, role );
 			Bind( () => row.Selected = C.Role == role );
 		}
 
+		BuildTakes();
 		BuildRetarget();
+	}
+
+	/// <summary>Takes holding several actions on one timeline, split into one clip per action.</summary>
+	private void BuildTakes()
+	{
+		var session = C.Session;
+		var takes = session.SplittableTakes.ToList();
+		if ( takes.Count == 0 )
+			return;
+		var card = AddCard( "content_cut", "Actions in one take", out _, "Takes that hold several actions one after another are split into one clip per action" );
+		card.Layout.Add( UiStyle.Muted( new Label( "Each part is a clip you can pick above. Type the frames where actions start to split differently.", card ) { WordWrap = true }, small: true ) );
+		foreach ( var take in takes )
+		{
+			var clip = session.SourceAsset.FindClip( take );
+			session.TakeParts.TryGetValue( take, out var parts );
+			var manual = C.Setup.TakeSplits.ContainsKey( take );
+			var row = UiStyle.FieldRow( card, card.Layout, ShortClip( take ), $"{take}: {clip?.FrameCount ?? 0} frames" );
+			var starts = parts is null ? "" : string.Join( ", ", parts.Skip( 1 ).Select( p => p.Start ) );
+			var edit = row.Add( UiStyle.Framed( new LineEdit( card ) { Text = starts, PlaceholderText = "not split", ToolTip = "Frames where each action starts, separated by commas; Enter applies" } ), 1 );
+			edit.ReturnPressed += () => Safe( () =>
+			{
+				var frames = new List<int>();
+				foreach ( var part in edit.Text.Split( new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries ) )
+				{
+					if ( !int.TryParse( part, out var f ) || f <= 0 || f >= (clip?.FrameCount ?? 0) )
+					{
+						C.SetStatus( $"'{part}' is not a frame inside {take} (1 to {(clip?.FrameCount ?? 1) - 1}).", Theme.Red );
+						return;
+					}
+					frames.Add( f );
+				}
+				Split( take, frames );
+			} );
+			row.Add( new Pill( card, parts is null ? "WHOLE" : $"{parts.Count} PARTS", manual ? Theme.Blue : Theme.TextLight, manual ? "Split by you" : "Split automatically" ) );
+			if ( manual )
+				row.Add( UiStyle.Icon( card, "auto_fix_high", () => Split( take, null ), "Split automatically again" ) );
+			if ( parts is not null )
+				row.Add( UiStyle.Icon( card, "block", () => Split( take, new List<int>() ), "Keep this take whole" ) );
+		}
+	}
+
+	private void Split( string take, List<int> starts )
+	{
+		var session = C.Session;
+		_ = C.RunAsync( "Splitting takes", ( p, c ) => session.SetTakeSplitsAsync( take, starts, p, c ) );
 	}
 
 	private void BuildRetarget()
@@ -90,16 +141,17 @@ public sealed class AnimationsStep : StepPanel
 	{
 		var s = C.Setup;
 		var layout = row.Layout;
-		var label = layout.Add( new Label( AnimationRoles.Label( role ), row ) { FixedWidth = RoleColumn, FixedHeight = UiStyle.ControlHeight, Alignment = TextFlag.LeftCenter } );
+		var label = layout.Add( new Label( AnimationRoles.Label( role, s.Type ), row ) { FixedWidth = RoleColumn, FixedHeight = UiStyle.ControlHeight, Alignment = TextFlag.LeftCenter } );
 		if ( C.Role == role )
 			UiStyle.Bold( label );
 
 		s.WeaponAnimations.TryGetValue( role, out var binding );
 		var hasClip = binding is not null && !string.IsNullOrEmpty( binding.Clip );
 		var fallback = !hasClip && AnimationRoles.Fallback( role ) is { } f && s.WeaponAnimations.TryGetValue( f, out var fb ) && !string.IsNullOrEmpty( fb.Clip ) ? f : (AnimationRole?)null;
-		var current = hasClip ? ShortClip( binding.Clip ) : fallback is { } fr ? $"uses {AnimationRoles.Label( fr )}" : "None";
-		layout.Add( new ClickField( row, current, "movie", hasClip ? Theme.Green : Theme.TextLight, () => ChangeWeaponClip( role ),
-			hasClip ? $"Weapon clip for {AnimationRoles.Label( role )}: {binding.Clip}. Click to change." : $"No weapon clip for {AnimationRoles.Label( role )}. Click to pick one." ) { Muted = !hasClip }, 1 );
+		var current = hasClip ? ShortClip( binding.Clip ) : fallback is { } fr ? $"uses {AnimationRoles.Label( fr, s.Type )}" : "None";
+		var more = hasClip && binding.Variants.Count > 0 ? $" +{binding.Variants.Count}" : "";
+		var tip = hasClip ? $"Weapon clip for {AnimationRoles.Label( role, s.Type )}: {binding.Clip}.{(more.Length > 0 ? $" Played in turn with {string.Join( ", ", binding.Variants )}." : "")} Click to change." : $"No weapon clip for {AnimationRoles.Label( role, s.Type )}. Click to pick one.";
+		layout.Add( new ClickField( row, current + more, "movie", hasClip ? Theme.Green : Theme.TextLight, () => ChangeWeaponClip( role ), tip ) { Muted = !hasClip }, 1 );
 
 		if ( hasClip )
 			layout.Add( binding.Manual ? new Pill( row, "EDITED", Theme.Blue, "You picked this clip", column: true ) : new ConfidencePill( row, binding.Confidence, false, C.Analysis.AssignedAnimations.TryGetValue( role, out var guess ) ? guess.Reason : null ) );
@@ -151,7 +203,43 @@ public sealed class AnimationsStep : StepPanel
 			items.Add( new PickerItem( clip.Name, clip.Name, $"{looksLike}{clip.Duration:0.00} s", suggested, binding?.Clip == clip.Name ) );
 		}
 		items.Add( new PickerItem( "", "None", "no weapon clip", Current: binding is null || string.IsNullOrEmpty( binding.Clip ) ) );
-		new SearchPicker( this, $"Weapon clip for {AnimationRoles.Label( role )}", items, name => SetClip( role, string.IsNullOrEmpty( name ) ? null : name ) ).Open();
+		// Attacks can play several clips in turn: add one as a variant, or drop the variants.
+		if ( AnimationRoles.HasVariants( role ) && binding is not null && !string.IsNullOrEmpty( binding.Clip ) )
+		{
+			foreach ( var clip in C.Analysis.Asset.Clips.Where( c => c.Name != binding.Clip && !binding.Variants.Contains( c.Name ) ) )
+				items.Add( new PickerItem( VariantKey + clip.Name, $"+ {clip.Name}", "also play this one, in turn", false, false ) );
+			if ( binding.Variants.Count > 0 )
+				items.Add( new PickerItem( VariantKey, "Only the first clip", $"stop playing {binding.Variants.Count} more in turn", false, false ) );
+		}
+		new SearchPicker( this, $"Weapon clip for {AnimationRoles.Label( role, s.Type )}", items, name =>
+		{
+			if ( name is not null && name.StartsWith( VariantKey, StringComparison.Ordinal ) )
+				SetVariant( role, name[VariantKey.Length..] );
+			else
+				SetClip( role, string.IsNullOrEmpty( name ) ? null : name );
+		} ).Open();
+	}
+
+	private const string VariantKey = "\u0001variant:";
+
+	/// <summary>Adds a clip played in turn with the role's clip; an empty name removes them all.</summary>
+	private void SetVariant( AnimationRole role, string clip )
+	{
+		Safe( () =>
+		{
+			var s = C.Setup;
+			if ( !s.WeaponAnimations.TryGetValue( role, out var binding ) )
+				return;
+			if ( string.IsNullOrEmpty( clip ) )
+				binding.Variants.Clear();
+			else if ( !binding.Variants.Contains( clip ) )
+				binding.Variants.Add( clip );
+			binding.Manual = true;
+			C.Session.Revalidate();
+			C.MarkChanged();
+			C.SelectRole( role );
+			C.SetStatus( string.IsNullOrEmpty( clip ) ? $"{AnimationRoles.Label( role, s.Type )} plays only {binding.Clip}." : $"{AnimationRoles.Label( role, s.Type )} plays {binding.Clip} and {string.Join( ", ", binding.Variants )} in turn.", Theme.Green );
+		} );
 	}
 
 	private void SetClip( AnimationRole role, string clip )
@@ -162,7 +250,7 @@ public sealed class AnimationsStep : StepPanel
 			if ( clip is null )
 				s.WeaponAnimations.Remove( role );
 			else
-				s.WeaponAnimations[role] = new AnimationBinding { Clip = clip, Confidence = 1f, Manual = true };
+				s.WeaponAnimations[role] = new AnimationBinding { Clip = clip, Confidence = 1f, Manual = true, Variants = s.WeaponAnimations.TryGetValue( role, out var old ) ? old.Variants.Where( v => v != clip ).ToList() : new List<string>() };
 			C.Session.Revalidate();
 			C.MarkChanged();
 			C.SelectRole( role );

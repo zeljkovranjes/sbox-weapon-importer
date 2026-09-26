@@ -392,6 +392,8 @@ public sealed class WeaponStep : StepPanel
 	public static string TypeIcon( WeaponType type ) => type switch
 	{
 		WeaponType.Melee => "hardware",
+		WeaponType.Item => "flashlight_on",
+		WeaponType.Unarmed => "sports_mma",
 		WeaponType.Launcher => "rocket_launch",
 		WeaponType.Custom => "category",
 		_ => "gps_fixed",

@@ -56,6 +56,11 @@ public static class ViewmodelParts
     /// The rig's camera bone ("Camera", "Head_Cam", "cam_01"...: a "camera" or whole-word "cam"
     /// in its name, end bones skipped), or -1.
     /// </summary>
+    /// <summary>A bone named as a camera ("Camera_007", "cam", "FP_Cam"), not a bone-chain end.</summary>
+    public static bool IsCameraName(string name)
+        => !name.EndsWith("_end", StringComparison.OrdinalIgnoreCase)
+           && (name.Contains("camera", StringComparison.OrdinalIgnoreCase) || WordsOf(name).Contains("cam"));
+
     public static int CameraBone(Skeleton skeleton)
     {
         var fallback = -1;
