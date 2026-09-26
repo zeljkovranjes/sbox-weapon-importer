@@ -494,6 +494,8 @@ public sealed class HandsStep : StepPanel
 			Slider( card, card.Layout, label, tip, 0f, 1.6f, 1f, v => $"{v * 100f:0}%", v => Curl( kind, v ) );
 		}
 		card.Layout.Add( UiStyle.Muted( new Label( "100% is the automatic fit. Changes are kept as a hand edit.", card ) { WordWrap = true }, small: true ) );
+		if ( hand.PinkyFollowsRing )
+			card.Layout.Add( UiStyle.Muted( new Label( "This character's model copies the ring finger onto the pinky, so they share one slider.", card ) { WordWrap = true }, small: true ) );
 	}
 
 	private void Curl( FingerKind kind, float factor )
