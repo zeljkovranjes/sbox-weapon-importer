@@ -1,0 +1,185 @@
+#nullable enable annotations
+
+namespace WeaponImporter.EditorTools.Core.Analysis;
+
+/// <summary>
+/// Maps animation names onto <see cref="AnimationRole"/>s using aliases common across game
+/// rigs and marketplace packs (<c>shoot</c>, <c>reload_empty</c>, <c>deploy</c>, <c>lookat</c>,
+/// <c>ads_fire</c>, <c>rechamber</c>...). Scoring is token based so prefixes, numbering and
+/// casing do not matter.
+/// </summary>
+public static class AnimationClassifier
+{
+    private sealed record Rule(AnimationRole Role, string[] Any, string[]? Joined = null, string[]? Requires = null, string[]? Excludes = null, float Weight = 1f);
+
+    private static readonly string[] AimTokens = { "ads", "aim", "aiming", "iron", "ironsight", "ironsights", "sight", "sights", "zoom", "scope" };
+    private static readonly string[] AimLoopTokens = { "idle", "loop", "hold", "pose", "static", "aiming", "breathing", "breath" };
+    private static readonly string[] AimOutTokens = { "out", "exit", "end", "lower", "leave", "stop", "release" };
+
+    // Order matters only for ties; more specific rules carry higher weights.
+    private static readonly Rule[] Rules =
+    {
+        new(AnimationRole.AdsFire, new[] { "fire", "shoot", "shot", "attack", "firing" }, new[] { "adsfire", "aimfire", "ironfire", "firead", "fireaim", "fireiron", "sightfire", "scopefire" }, Requires: new[] { "ads", "aim", "iron", "ironsight", "ironsights", "sight", "scope", "zoom" }, Weight: 1.35f),
+        new(AnimationRole.FireEmpty, new[] { "fire", "shoot", "shot", "attack", "dry", "dryfire" }, new[] { "fireempty", "firelast", "shootempty", "shootlast", "dryfire", "lastshot", "emptyfire" }, Requires: new[] { "empty", "last", "dry", "final" }, Weight: 1.3f),
+        new(AnimationRole.Fire, new[] { "fire", "shoot", "shot", "attack", "firing", "recoil", "primary", "burst", "auto", "semi" }, Excludes: new[] { "reload", "select", "mode", "switch" }),
+
+        new(AnimationRole.EmptyReload, new[] { "reload", "rld", "reloading" }, new[] { "reloadempty", "emptyreload", "reloadlong", "reloaddry", "reloadfull" }, Requires: new[] { "empty", "dry", "long", "full", "outofammo" }, Weight: 1.3f),
+        new(AnimationRole.TacticalReload, new[] { "reload", "rld", "reloading" }, new[] { "reloadtac", "tacreload", "reloadtactical", "tacticalreload", "reloadshort", "reloadpartial" }, Requires: new[] { "tac", "tactical", "short", "partial", "fast", "speed" }, Weight: 1.3f),
+        new(AnimationRole.Reload, new[] { "reload", "rld", "reloading", "magswap", "magchange" }, Excludes: new[] { "start", "end", "loop", "insert", "begin", "enter", "finish", "exit", "shell", "single" }),
+        // Shell-by-shell reloads (shotguns, tube-fed rifles): start / one shell / end.
+        new(AnimationRole.ReloadStart, new[] { "start", "begin", "enter", "open", "in", "intro" }, new[] { "reloadstart", "startreload", "reloadbegin", "reloadenter", "reloadopen", "reloadintro", "idletoreload", "toreload" }, Requires: new[] { "reload", "rld", "reloading", "load", "loading" }, Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
+        new(AnimationRole.ReloadInsert, new[] { "insert", "loop", "shell", "single", "load", "inserting", "step" }, new[] { "reloadinsert", "reloadstep", "insertshell", "shellinsert", "reloadloop", "loadshell", "shellload", "reloadshell", "reloadsingle", "insertround", "loadround" }, Requires: new[] { "reload", "rld", "reloading", "insert", "shell", "round", "load" }, Excludes: new[] { "start", "begin", "end", "finish", "exit", "fire", "shoot" }, Weight: 1.3f),
+        new(AnimationRole.ReloadEnd, new[] { "end", "finish", "exit", "close", "out", "outro", "stop" }, new[] { "reloadend", "endreload", "reloadfinish", "reloadexit", "reloadclose", "reloadoutro", "reloadtoidle", "reloadto" }, Requires: new[] { "reload", "rld", "reloading", "load", "loading" }, Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
+
+        new(AnimationRole.Unjam, new[] { "unjam", "clear", "clearjam", "fixjam", "malfunctionclear", "tapack", "remedy" }, new[] { "unjam", "clearjam", "fixjam", "jamclear", "jamfix" }, Weight: 1.3f),
+        new(AnimationRole.Jam, new[] { "jam", "jammed", "malfunction", "misfire", "stovepipe" }, Excludes: new[] { "clear", "fix", "un" }),
+        new(AnimationRole.Bolt, new[] { "bolt", "rechamber", "chamber", "pump", "charge", "charging", "cock", "cocking", "rack", "cycle", "lever", "slide" }, Excludes: new[] { "reload", "fire", "shoot", "idle" }),
+
+        new(AnimationRole.Draw, new[] { "draw", "deploy", "equip", "pullout", "raise", "unholster", "takeout", "ready", "select", "pickup" }, new[] { "firstdraw", "drawfirst", "pullout", "takeout" }, Excludes: new[] { "reload" }),
+        new(AnimationRole.Holster, new[] { "holster", "putaway", "unequip", "lower", "stow", "putdown", "deselect", "hide" }, new[] { "putaway", "putdown" }, Excludes: new[] { "unholster" }),
+        new(AnimationRole.Inspect, new[] { "inspect", "lookat", "examine", "check", "fidget", "admire", "showoff", "look" }, new[] { "lookat", "checkmag", "magcheck", "showoff" }),
+
+        new(AnimationRole.Sprint, new[] { "sprint", "run", "running", "dash" }),
+        new(AnimationRole.Walk, new[] { "walk", "walking", "move", "moving", "jog", "strafe", "bob" }),
+        // Aiming, any naming style: raising the sights ("Aim_In", "ADS", "IronIn", "Zoom_Enter"),
+        // the held loop ("Aim_Idle", "ADS_Loop"), lowering them ("Aim_Out", "ADS_Exit", "Unaim").
+        new(AnimationRole.Ads, AimTokens.Concat(new[] { "adsin", "aimin" }).ToArray(), new[] { "aimin", "adsin", "ironin", "zoomin", "sightin", "scopein", "aimenter", "adsenter", "aimstart", "adsstart" }, Excludes: AimOutTokens.Concat(AimLoopTokens).Concat(new[] { "fire", "shoot", "unaim", "unads" }).ToArray()),
+        new(AnimationRole.AdsIdle, AimLoopTokens, new[] { "aimidle", "adsidle", "aimloop", "adsloop", "ironidle", "zoomidle", "aimhold", "adshold", "aimingidle" }, Requires: AimTokens, Excludes: AimOutTokens.Concat(new[] { "fire", "shoot" }).ToArray(), Weight: 1.3f),
+        new(AnimationRole.AdsOut, AimOutTokens.Concat(new[] { "unaim", "unads", "adsout", "aimout" }).ToArray(), new[] { "aimout", "adsout", "ironout", "zoomout", "sightout", "scopeout", "unaim", "unads", "aimexit", "adsexit", "aimend", "adsend" }, Requires: AimTokens.Concat(new[] { "unaim", "unads", "adsout", "aimout" }).ToArray(), Excludes: new[] { "fire", "shoot" }, Weight: 1.3f),
+        new(AnimationRole.Melee, new[] { "melee", "bash", "stab", "slash", "swing", "hit", "knife", "punch", "butt", "strike", "attackmelee", "jab", "hook", "uppercut", "chop", "thrust" }, new[] { "meleeattack" }, Excludes: new[] { "heavy", "strong", "power", "charged", "secondary", "alt", "get", "react", "reaction", "damage", "hurt", "gethit", "hitreact" }, Weight: 1.1f),
+        new(AnimationRole.Attack2, new[] { "heavy", "strong", "power", "charged", "secondary", "alt", "attack2", "special" }, new[] { "heavyattack", "attackheavy", "secondaryattack", "attacksecondary", "attack2", "altattack", "attackalt", "powerattack", "chargedattack", "strongattack", "heavyslash", "heavyswing" }, Requires: new[] { "attack", "slash", "swing", "stab", "hit", "strike", "punch", "melee", "chop", "attack2" }, Weight: 1.3f),
+        // Guarding: raise / hold / lower.
+        new(AnimationRole.BlockStart, new[] { "start", "begin", "enter", "in", "raise", "up" }, new[] { "blockstart", "startblock", "blockin", "blockbegin", "parrystart", "guardstart", "guardup", "blockenter" }, Requires: new[] { "block", "parry", "guard", "defend", "defense" }, Weight: 1.3f),
+        new(AnimationRole.Block, new[] { "block", "parry", "guard", "defend", "defense", "blocking" }, new[] { "blockloop", "blockidle", "blockhold", "parryloop", "guardloop", "guardidle" }, Excludes: new[] { "start", "begin", "enter", "end", "stop", "exit", "out" }),
+        new(AnimationRole.BlockEnd, new[] { "end", "stop", "exit", "out", "lower", "down", "release" }, new[] { "blockend", "blockstop", "endblock", "blockout", "blockexit", "parryend", "guardend", "guarddown" }, Requires: new[] { "block", "parry", "guard", "defend", "defense" }, Weight: 1.3f),
+        // Items: use once, or start / hold / finish a use.
+        new(AnimationRole.Use, new[] { "use", "drink", "eat", "inject", "heal", "consume", "apply", "bandage", "smoke", "injection", "healing", "sip", "gulp", "swallow", "spray", "activate", "press", "toggle" }, new[] { "useitem", "itemuse" }, Excludes: new[] { "start", "begin", "enter", "loop", "hold", "end", "stop", "exit", "finish", "takeout", "out" }),
+        new(AnimationRole.UseStart, new[] { "start", "begin", "enter", "in", "raise", "up", "open" }, new[] { "usestart", "startuse", "drinkstart", "eatstart", "takestart", "healstart", "injectstart" }, Requires: new[] { "use", "drink", "eat", "inject", "heal", "consume", "take", "apply", "bandage", "smoke" }, Weight: 1.3f),
+        new(AnimationRole.UseLoop, new[] { "loop", "hold", "idle", "holding", "continue" }, new[] { "useloop", "drinkloop", "eatloop", "takeloop", "healloop", "usehold" }, Requires: new[] { "use", "drink", "eat", "inject", "heal", "consume", "take", "apply", "bandage", "smoke" }, Weight: 1.3f),
+        new(AnimationRole.UseEnd, new[] { "end", "stop", "exit", "finish", "out", "lower", "down", "close" }, new[] { "useend", "usestop", "drinkend", "eatend", "takestop", "takeend", "healend", "injectend" }, Requires: new[] { "use", "drink", "eat", "inject", "heal", "consume", "take", "apply", "bandage", "smoke" }, Weight: 1.3f),
+        new(AnimationRole.Throw, new[] { "throw", "toss", "lob", "pitch", "hurl" }, new[] { "throwgrenade", "grenadethrow" }, Weight: 1.2f),
+        new(AnimationRole.Idle, new[] { "idle", "rest", "hold", "static", "pose", "bind", "stand", "base", "breathing", "breath", "breathe" }, new[] { "breathing", "idleloop" }, Excludes: new[] { "to", "fire", "reload" }, Weight: 0.9f),
+    };
+
+    private static readonly string[] FirstPersonTokens = { "fp", "1p", "vm", "v", "view", "viewmodel", "arms", "firstperson", "fps" };
+    private static readonly string[] ThirdPersonTokens = { "tp", "3p", "wm", "w", "world", "worldmodel", "thirdperson", "tps", "body", "player", "citizen" };
+
+    /// <summary>Classifies one animation name.</summary>
+    public static AnimationGuess Classify(string name, AnimationMotionHint? motion = null)
+    {
+        var tokens = NameTokens.Split(name);
+        var joined = NameTokens.Joined(tokens);
+        var perspective = NameTokens.Has(tokens, ThirdPersonTokens) ? AnimationPerspective.ThirdPerson
+            : NameTokens.Has(tokens, FirstPersonTokens) ? AnimationPerspective.FirstPerson
+            : AnimationPerspective.Any;
+
+        AnimationRole best = AnimationRole.Unknown;
+        float bestScore = 0f;
+        string reason = "no matching name";
+
+        foreach (var rule in Rules)
+        {
+            var score = 0f;
+            string why = "";
+            if (rule.Joined is { } joinedAliases && joinedAliases.Any(j => joined.Contains(j, StringComparison.Ordinal)))
+            {
+                score = 1f;
+                why = $"name contains '{joinedAliases.First(j => joined.Contains(j, StringComparison.Ordinal))}'";
+            }
+            else if (NameTokens.Has(tokens, rule.Any))
+            {
+                if (rule.Requires is { } req && !NameTokens.Has(tokens, req))
+                    continue;
+                score = rule.Requires is null ? 0.8f : 0.95f;
+                why = $"'{tokens.First(t => rule.Any.Any(a => t == a || (a.Length >= 4 && t.StartsWith(a, StringComparison.Ordinal))))}' in name";
+            }
+            else
+            {
+                continue;
+            }
+
+            if (rule.Excludes is { } ex && NameTokens.Has(tokens, ex))
+                score *= 0.45f;
+            // The role's own word ("Idle") beats a synonym ("Hold") on a tie.
+            if (tokens.Contains(rule.Any[0]))
+                score += 0.02f;
+            score *= rule.Weight;
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = rule.Role;
+                reason = why;
+            }
+        }
+
+        // Motion evidence breaks ties and rescues meaningless names ("anim_03").
+        if (motion is { } m)
+        {
+            var (role, conf, why) = FromMotion(m);
+            if (best == AnimationRole.Unknown && role != AnimationRole.Unknown)
+            {
+                best = role;
+                bestScore = conf;
+                reason = why;
+            }
+            else if (role == best && role != AnimationRole.Unknown)
+            {
+                bestScore = MathF.Min(1f, bestScore + 0.1f);
+            }
+        }
+
+        return new AnimationGuess(name, best, MathF.Min(1f, bestScore), reason) { Perspective = perspective };
+    }
+
+    /// <summary>
+    /// Classifies a set of animations and resolves duplicates: each role goes to the clip with
+    /// the highest confidence, preferring shorter base names ("reload" over "reload_02").
+    /// </summary>
+    public static IReadOnlyDictionary<AnimationRole, AnimationGuess> Assign(IEnumerable<AnimationGuess> guesses, AnimationPerspective prefer = AnimationPerspective.Any)
+    {
+        var result = new Dictionary<AnimationRole, AnimationGuess>();
+        foreach (var group in guesses.Where(g => g.Role != AnimationRole.Unknown).GroupBy(g => g.Role))
+        {
+            var pick = group
+                .OrderByDescending(g => g.Confidence + (prefer != AnimationPerspective.Any && g.Perspective == prefer ? 0.15f : 0f) - (prefer != AnimationPerspective.Any && g.Perspective != AnimationPerspective.Any && g.Perspective != prefer ? 0.3f : 0f))
+                .ThenBy(g => g.Animation.Count(char.IsDigit))
+                .ThenBy(g => g.Animation.Length)
+                .First();
+            result[group.Key] = pick;
+        }
+
+        // A lone "reload" that is actually the empty one leaves Reload itself free: promote.
+        if (!result.ContainsKey(AnimationRole.Reload))
+        {
+            if (result.TryGetValue(AnimationRole.TacticalReload, out var tac))
+                result[AnimationRole.Reload] = tac with { Role = AnimationRole.Reload, Confidence = tac.Confidence * 0.9f, Reason = "tactical reload used as reload" };
+            else if (result.TryGetValue(AnimationRole.EmptyReload, out var empty))
+                result[AnimationRole.Reload] = empty with { Role = AnimationRole.Reload, Confidence = empty.Confidence * 0.85f, Reason = "empty reload used as reload" };
+        }
+        // "IdleToReload" / "Reload" / "ReloadToIdle": between a start and an end, the plain
+        // reload is the one-shell part.
+        if (result.ContainsKey(AnimationRole.ReloadStart) && result.ContainsKey(AnimationRole.ReloadEnd)
+            && !result.ContainsKey(AnimationRole.ReloadInsert) && result.TryGetValue(AnimationRole.Reload, out var middle))
+        {
+            result[AnimationRole.ReloadInsert] = middle with { Role = AnimationRole.ReloadInsert, Reason = "reload between a reload start and end" };
+            result.Remove(AnimationRole.Reload);
+        }
+        if (!result.ContainsKey(AnimationRole.Fire) && result.TryGetValue(AnimationRole.AdsFire, out var adsFire))
+            result[AnimationRole.Fire] = adsFire with { Role = AnimationRole.Fire, Confidence = adsFire.Confidence * 0.8f, Reason = "ADS fire used as fire" };
+        return result;
+    }
+
+    private static (AnimationRole, float, string) FromMotion(AnimationMotionHint m)
+    {
+        if (m.MagazineTravel > 2f && m.Duration > 1f)
+            return (AnimationRole.Reload, 0.6f, "magazine leaves the weapon");
+        if (m.BoltTravel > 0.3f && m.Duration < 0.6f)
+            return (AnimationRole.Fire, 0.55f, "short clip with slide/bolt cycling");
+        if (m.BoltTravel > 0.3f && m.Duration >= 0.6f)
+            return (AnimationRole.Bolt, 0.5f, "bolt cycles without magazine change");
+        if (m.RootTravel < 0.05f && m.Duration > 0.5f && m.MaxBoneMotion < 0.1f)
+            return (AnimationRole.Idle, 0.5f, "almost no motion");
+        return (AnimationRole.Unknown, 0f, "motion inconclusive");
+    }
+}
