@@ -82,10 +82,11 @@ public static class RetargeterBridge
     /// </summary>
     public static async Task<RetargetResult> RetargetAsync( IReadOnlyList<string> files, string folder, string modelName, IProgress<string> progress = null, CancellationToken cancel = default )
     {
-        var requestType = FindType( "HumanoidRetargeter.RetargetRequest" );
-        var retargeter = FindType( "HumanoidRetargeter.Retargeter" );
-        var pipeline = FindType( "HumanoidRetargeter.Editor.EditorPipeline" );
-        var optionsType = FindType( "HumanoidRetargeter.BatchOptions" );
+        // Current Humanoid Retargeter names first, then the names from before its 2026-10-06 restructure.
+        var requestType = FindType( "HumanoidRetargeter.Core.RetargetRequest" ) ?? FindType( "HumanoidRetargeter.RetargetRequest" );
+        var retargeter = FindType( "HumanoidRetargeter.Core.Retargeter" ) ?? FindType( "HumanoidRetargeter.Retargeter" );
+        var pipeline = FindType( "HumanoidRetargeter.EditorTools.EditorPipeline" ) ?? FindType( "HumanoidRetargeter.Editor.EditorPipeline" );
+        var optionsType = FindType( "HumanoidRetargeter.Core.BatchOptions" ) ?? FindType( "HumanoidRetargeter.BatchOptions" );
         if ( requestType is null || retargeter is null || pipeline is null )
             return new RetargetResult( "", Array.Empty<string>(), "The Humanoid Retargeter is not installed." );
         try

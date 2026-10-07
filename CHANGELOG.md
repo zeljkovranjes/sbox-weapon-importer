@@ -22,3 +22,6 @@
   importer and the components behave as before, and the baker still writes the old component type
   names (resolved through the aliases), so rebaking a weapon doesn't change its prefab.
 - The package now has a description, tags and a README in the standard format.
+### Fixed
+- Retargeting animations through the Humanoid Retargeter works with its restructured version
+  (it moved its types into new namespaces); older versions of the retargeter still work too.
