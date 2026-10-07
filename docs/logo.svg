@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Weapon Importer: a pistol "rigged" like the Humanoid Retargeter's runner (same palette). -->
+  <rect x="0" y="0" width="1024" height="1024" rx="168" fill="#181920"/>
+
+  <!-- Import frame: corner brackets (grey), orange import mark at the top. -->
+  <g fill="none" stroke="#57585D" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 120 290 L 120 170 Q 120 120 170 120 L 290 120"/>
+    <path d="M 734 120 L 854 120 Q 904 120 904 170 L 904 290"/>
+    <path d="M 904 734 L 904 854 Q 904 904 854 904 L 734 904"/>
+    <path d="M 290 904 L 170 904 Q 120 904 120 854 L 120 734"/>
+  </g>
+  <g fill="none" stroke="#FF9800" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 512 58 L 512 132"/>
+    <path d="M 478 102 L 512 136 L 546 102"/>
+  </g>
+
+  <g transform="translate(-14 -18)">
+    <!-- Pistol (light), drawn as thick rounded strokes like the runner's limbs. -->
+    <g fill="none" stroke="#F0F0F5" stroke-linecap="round" stroke-linejoin="round">
+      <!-- slide -->
+      <path d="M 262 400 L 792 400" stroke-width="112"/>
+      <!-- grip, raked back -->
+      <path d="M 345 450 L 300 736" stroke-width="122"/>
+      <!-- trigger guard -->
+      <path d="M 420 452 L 420 530 Q 420 590 480 590 L 560 590 Q 604 590 612 540 L 626 456" stroke-width="30"/>
+      <!-- trigger -->
+      <path d="M 506 456 Q 500 500 484 526" stroke-width="26"/>
+    </g>
+    <!-- sights -->
+    <g fill="#F0F0F5">
+      <rect x="264" y="318" width="40" height="34" rx="10"/>
+      <rect x="752" y="318" width="30" height="34" rx="10"/>
+    </g>
+    <!-- slide serrations -->
+    <g stroke="#57585D" stroke-width="12" stroke-linecap="round">
+      <path d="M 262 372 L 262 428"/>
+      <path d="M 292 372 L 292 428"/>
+      <path d="M 322 372 L 322 428"/>
+    </g>
+
+    <!-- The rig inside the weapon: bones (grey), contacts (orange), main grip (gold). -->
+    <g fill="none" stroke="#57585D" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 302 716 L 322 600 L 350 420 L 420 400 L 790 400"/>
+    </g>
+    <circle cx="322" cy="600" r="40" fill="#FFC140"/>
+    <circle cx="302" cy="716" r="26" fill="#FF9800"/>
+    <circle cx="420" cy="400" r="26" fill="#FF9800"/>
+    <circle cx="610" cy="400" r="26" fill="#FF9800"/>
+    <circle cx="790" cy="400" r="26" fill="#FF9800"/>
+    <circle cx="484" cy="526" r="24" fill="#FF9800"/>
+  </g>
+</svg>

@@ -11,6 +11,9 @@
   "Mounts": null,
   "IsStandaloneOnly": false,
   "Metadata": {
-    "Summary": "Import a weapon, fit third-person hands to its real geometry, preview every animation and bake a game-ready prefab."
+    "Summary": "Import a weapon, fit third-person hands to its real geometry, preview every animation and bake a game-ready prefab.",
+    "Description": "An editor window (View > Weapon Importer) that imports an FBX, glTF/GLB or VMDL weapon, fits the character's hands to the weapon's real geometry, lets you check every animation in first and third person, and bakes a prefab with model, materials and animgraph. In game, the Weapon Hold component keeps the hands on the weapon and plays its actions, and Weapon Viewmodel shows the first-person arms. Retargeting third-person animations from other rigs needs the Humanoid Retargeter library.",
+    "WebsiteUrl": "https://github.com/zeljkovranjes/sbox-weapon-importer",
+    "Tags": [ "tools", "weapons", "import", "first-person", "third-person", "ik" ]
   }
 }
