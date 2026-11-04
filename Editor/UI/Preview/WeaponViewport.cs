@@ -8,6 +8,7 @@ using N = System.Numerics;
 namespace WeaponImporter.EditorTools.UI.Preview;
 using WeaponImporter.Components;
 using WeaponImporter.EditorTools.Engine;
+using WeaponImporter.Engine;
 
 /// <summary>
 /// The live preview: the character with its own animgraph holding the weapon through the same
@@ -334,12 +335,12 @@ public sealed partial class WeaponViewport : SceneRenderingWidget
 	private void RestartGraph( AnimationRole role, int type )
 	{
 		GraphRestarts++;
-		_body.SceneModel?.ResetAnimParameters();
+		CharacterPoser.ResetParameters( _body );
 		CharacterPoser.ApplyParameters( _body, type );
 		for ( var t = 0f; t < ReplaySettle; t += ReplayStep )
 			TickScene( ReplayStep );
 		if ( AnimationRoles.GraphTrigger( role ) is { } trigger )
-			_body.Set( trigger, true );
+			AnimGraphParameters.Trigger( _body, trigger );
 		_graphRole = role;
 		_graphTime = 0f;
 	}
