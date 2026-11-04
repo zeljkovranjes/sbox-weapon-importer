@@ -10,6 +10,7 @@ using WeaponImporter.EditorTools.UI.Preview;
 using WeaponImporter.EditorTools.UI.Steps;
 using WeaponImporter.EditorTools.UI.Timeline;
 using WeaponImporter.EditorTools.UI.Widgets;
+using WeaponImporter.Engine;
 
 /// <summary>
 /// The Weapon Importer tool window. First the drop page (drop a weapon or pick one); once the
@@ -250,6 +251,9 @@ public sealed partial class WeaponImporterWindow : Widget
 
 	private ComboBox _cameraCombo;
 	private ComboBox _characterCombo;
+	// The character's graph system beside it, and the model it was worked out for.
+	private Pill _graphPill;
+	private string _graphPillFor;
 	private SegmentedControl _compare;
 	private ViewportCamera _thirdPersonCamera = ViewportCamera.Orbit;
 	private bool _syncingHeader;
@@ -276,6 +280,7 @@ public sealed partial class WeaponImporterWindow : Widget
 
 		_characterCombo = bar.Add( UiStyle.Framed( new ComboBox( _viewportCard ) { FixedWidth = 150, ToolTip = "Character the hands are fitted to; the prefab works with any character using the same skeleton" } ) );
 		FillCharacters( "human" );
+		_graphPill = bar.Add( new Pill( _viewportCard, "", Theme.TextLight, "The animation graph system the character is posed with; the weapon's own graphs are baked for the same one" ) );
 
 		_compare = bar.Add( new SegmentedControl( _viewportCard ) { FixedHeight = UiStyle.ControlHeight, FixedWidth = 190, ToolTip = "Original: the character's animation as authored. Corrected: hands on this weapon." } );
 		_compare.AddOption( "Original", "history" );
@@ -338,6 +343,7 @@ public sealed partial class WeaponImporterWindow : Widget
 			// Third-person controls only make sense with the character.
 			Show( _cameraCombo, !firstPerson );
 			Show( _characterCombo, !firstPerson );
+			Show( _graphPill, !firstPerson );
 			Show( _compare, !firstPerson );
 			var camera = Array.FindIndex( Cameras, c => c.Mode == _viewport.CameraMode );
 			if ( camera >= 0 )
@@ -354,11 +360,22 @@ public sealed partial class WeaponImporterWindow : Widget
 			}
 			if ( character >= 0 && _characterCombo.CurrentIndex != character )
 				_characterCombo.CurrentIndex = character;
+			ShowGraphVersion( current );
 		}
 		finally
 		{
 			_syncingHeader = false;
 		}
+	}
+
+	/// <summary>Shows which graph system <paramref name="character"/> is posed with (worked out once per character).</summary>
+	private void ShowGraphVersion( string character )
+	{
+		if ( _graphPillFor == character )
+			return;
+		_graphPillFor = character;
+		var version = CharacterLibrary.VersionOf( character );
+		_graphPill.Set( AnimGraphVersions.Describe( version ), version == AnimGraphVersion.AnimGraph2 ? Theme.Green : Theme.TextLight );
 	}
 
 	// Character ids in the order of the character list (built-ins, then a custom model).

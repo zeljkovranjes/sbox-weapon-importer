@@ -8,6 +8,7 @@ using WeaponImporter.EditorTools.Core.Setup;
 
 namespace WeaponImporter.EditorTools.Engine;
 using WeaponImporter.Components;
+using WeaponImporter.Engine;
 
 /// <summary>
 /// Bakes the corrected third-person animation: each character action is played in a hidden
@@ -88,13 +89,13 @@ public static class CorrectedAnimationBaker
                 var frames = new List<XForm[]>();
                 using ( scene.Push() )
                 {
-                    body.SceneModel?.ResetAnimParameters();
+                    CharacterPoser.ResetParameters( body );
                     CharacterPoser.ApplyParameters( body, setup.EffectiveHoldType );
                     hold.Play( "idle" );
                     for ( var t = 0f; t < 2f; t += step )
                         Tick( step );
                     if ( trigger is not null )
-                        body.Set( trigger, true );
+                        AnimGraphParameters.Trigger( body, trigger );
                     hold.Play( role.ToString().ToLowerInvariant() );
                     var count = Math.Max( 2, (int)MathF.Ceiling( seconds * Fps ) + 1 );
                     for ( var f = 0; f < count; f++ )

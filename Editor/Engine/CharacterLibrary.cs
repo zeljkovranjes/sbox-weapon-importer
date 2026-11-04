@@ -3,6 +3,7 @@ using WeaponImporter.EditorTools.Core.Grip;
 using WeaponImporter.EditorTools.Core.Ik;
 using WeaponImporter.EditorTools.Core.Maths;
 using WeaponImporter.EditorTools.Core.Rig;
+using WeaponImporter.Engine;
 
 namespace WeaponImporter.EditorTools.Engine;
 
@@ -41,9 +42,10 @@ public static class CharacterLibrary
         var model = Model.Load( path );
         if ( model is null || model.IsError )
             return $"'{path}' could not be loaded.";
-        if ( model.AnimGraph is null && model.AnimationCount == 0 )
+        var animGraph2 = AnimGraph2Of( model ) is not null;
+        if ( model.AnimGraph is null && model.AnimationCount == 0 && !animGraph2 )
             return $"{Label( character )} has no animations (a static body). Third-person grips are fitted to the character's hold animations: use a model that includes the citizen or human animations.";
-        if ( GraphFor( model ) is null )
+        if ( GraphFor( model ) is null && !animGraph2 )
             return $"{Label( character )} has no animation graph and its skeleton doesn't match the citizen or human one. Third-person grips are fitted to the character's hold animations.";
         var rig = CharacterRig.From( SkeletonOf( model ) );
         if ( rig is null )
@@ -113,7 +115,7 @@ public static class CharacterLibrary
         foreach ( var path in new[] { Human, Citizen } )
         {
             var builtIn = Model.Load( path );
-            if ( builtIn is null || builtIn.IsError || builtIn.AnimGraph is null || builtIn.BoneCount == 0 )
+            if ( builtIn is null || builtIn.IsError || (builtIn.AnimGraph is null && AnimGraphVersions.Of( builtIn ) != AnimGraphVersion.AnimGraph2) || builtIn.BoneCount == 0 )
                 continue;
             var shared = 0;
             for ( var i = 0; i < builtIn.BoneCount; i++ )
@@ -130,11 +132,40 @@ public static class CharacterLibrary
         return best;
     }
 
-    /// <summary>Sets up a character renderer: its model, and the graph it is posed with.</summary>
+    /// <summary>
+    /// The graph system a character is posed with: AnimGraph2 when it names an AnimGraph2 graph, or has no graph of
+    /// its own and borrows from a built-in character that does; AnimGraph1 otherwise. It decides how the preview
+    /// drives the character and which graphs a bake writes for the weapon.
+    /// </summary>
+    public static AnimGraphVersion VersionOf( string character )
+        => AnimGraph2Of( Model.Load( ModelPath( character ) ) ) is not null ? AnimGraphVersion.AnimGraph2 : AnimGraphVersion.Legacy;
+
+    /// <summary>The AnimGraph2 graph (a <c>.ag</c> path) a character is posed with (see <see cref="VersionOf"/>), or null.</summary>
+    public static string AnimGraph2Of( Model model )
+    {
+        if ( model is null || model.IsError )
+            return null;
+        if ( AnimGraphVersions.GraphPathOf( model ) is { } own )
+            return own;
+        if ( model.AnimGraph is not null )
+            return null;
+        GraphFor( model, out var borrowedFrom );
+        return borrowedFrom is null ? null : AnimGraphVersions.GraphPathOf( Model.Load( borrowedFrom ) );
+    }
+
+    /// <summary>
+    /// Sets up a character renderer: its model, and the graph it is posed with. Throws when its AnimGraph2 graph
+    /// doesn't load.
+    /// </summary>
     public static void Setup( SkinnedModelRenderer body, Model model )
     {
         body.Model = model;
-        if ( model?.AnimGraph is null && GraphFor( model ) is { } graph )
+        if ( AnimGraph2Of( model ) is { } animGraph2 )
+        {
+            if ( !AnimGraphVersions.UseAnimGraph2( body, animGraph2 ) )
+                throw new InvalidOperationException( $"The AnimGraph2 graph '{animGraph2}' of '{model.ResourcePath}' could not be loaded." );
+        }
+        else if ( model?.AnimGraph is null && GraphFor( model ) is { } graph )
             body.AnimationGraph = graph;
         body.UseAnimGraph = true;
         body.PlayAnimationsInEditorScene = true;

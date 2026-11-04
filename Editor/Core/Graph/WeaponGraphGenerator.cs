@@ -76,6 +76,11 @@ public static class WeaponGraphGenerator
     /// </summary>
     public static string Generate(string weaponName, IReadOnlyList<GraphClip> clips, string? cameraBone, out GraphSummary summary,
         string? previewModel = null, bool fireCyclesAction = true)
+        => GraphKv.Serialize(AnimGraphBuilder.Header, GenerateDocument(weaponName, clips, cameraBone, out summary, previewModel, fireCyclesAction));
+
+    /// <summary>The graph <see cref="Generate"/> writes, as a document (see <see cref="AnimGraph2Writer"/>).</summary>
+    public static GraphKvObject GenerateDocument(string weaponName, IReadOnlyList<GraphClip> clips, string? cameraBone, out GraphSummary summary,
+        string? previewModel = null, bool fireCyclesAction = true)
     {
         if (clips is null)
             throw new ArgumentNullException(nameof(clips));
@@ -489,6 +494,6 @@ public static class WeaponGraphGenerator
                     _ => true,
                 }).ToList());
 
-        return graph.Serialize(previewModel is null ? Array.Empty<string>() : new[] { previewModel }, cameraBone);
+        return graph.Document(previewModel is null ? Array.Empty<string>() : new[] { previewModel }, cameraBone);
     }
 }

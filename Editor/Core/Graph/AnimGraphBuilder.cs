@@ -185,8 +185,12 @@ public sealed class AnimGraphBuilder
     }
 
     public string Serialize(IEnumerable<string> previewModels, string? cameraBone)
+        => GraphKv.Serialize(Header, Document(previewModels, cameraBone));
+
+    /// <summary>The graph document <see cref="Serialize"/> writes, for converting it to other formats.</summary>
+    public GraphKvObject Document(IEnumerable<string> previewModels, string? cameraBone)
     {
-        var root = GraphKv.Obj(
+        return GraphKv.Obj(
             ("_class", "CAnimationGraph"),
             ("m_nodeManager", GraphKv.Obj(("_class", "CAnimNodeManager"), ("m_nodes", _nodes))),
             ("m_pParameterList", GraphKv.Obj(("_class", "CAnimParameterList"), ("m_Parameters", _parameters))),
@@ -208,6 +212,5 @@ public sealed class AnimGraphBuilder
                 ("m_sLockBoneName", cameraBone ?? ""),
                 ("m_bLockCamera", cameraBone is not null),
                 ("m_bViewModelCamera", false))));
-        return GraphKv.Serialize(Header, root);
     }
 }

@@ -2,6 +2,7 @@ using Sandbox;
 using WeaponImporter.EditorTools.Core.Ik;
 using WeaponImporter.EditorTools.Core.Rig;
 using WeaponImporter.EditorTools.Core.Weapon;
+using WeaponImporter.Engine;
 
 namespace WeaponImporter.EditorTools.Engine;
 
@@ -43,7 +44,7 @@ public sealed class CharacterPoser : IDisposable
             for ( var i = 0; i < steps; i++ )
             {
                 if ( trigger is not null && MathF.Abs( now - triggerTime ) < 1f / 60f )
-                    _body.Set( trigger, true );
+                    AnimGraphParameters.Trigger( _body, trigger );
                 now += 1f / 30f;
                 _scene.EditorTick( now, 1f / 30f );
             }
@@ -83,7 +84,7 @@ public sealed class CharacterPoser : IDisposable
         {
             // Fresh graph state: reset every parameter and let any earlier action finish, so the
             // action starts from the settled holdtype idle.
-            _body.SceneModel?.ResetAnimParameters();
+            ResetParameters( _body );
             ApplyParameters( _body, holdType );
             var clock = _clock;
             for ( var i = 0; i < 150; i++ )
@@ -99,7 +100,7 @@ public sealed class CharacterPoser : IDisposable
             {
                 if ( !fired && trigger is not null && now >= ActionLeadIn - step * 0.5f )
                 {
-                    _body.Set( trigger, true );
+                    AnimGraphParameters.Trigger( _body, trigger );
                     fired = true;
                 }
                 now += step;
@@ -134,7 +135,7 @@ public sealed class CharacterPoser : IDisposable
             return 0f;
         using ( _scene.Push() )
         {
-            _body.SceneModel?.ResetAnimParameters();
+            ResetParameters( _body );
             ApplyParameters( _body, holdType );
             var clock = _clock;
             for ( var i = 0; i < 150; i++ )
@@ -162,7 +163,7 @@ public sealed class CharacterPoser : IDisposable
                 sway = MathF.Max( sway, MathF.Max( (l - idle.L).Length, (r - idle.R).Length ) );
             }
             var threshold = MathF.Max( 1.0f, sway * 1.5f + 0.5f );
-            _body.Set( trigger, true );
+            AnimGraphParameters.Trigger( _body, trigger );
             var last = 0f;
             var moved = false;
             for ( var now = 0f; now < maxSeconds; now += step )
@@ -225,16 +226,27 @@ public sealed class CharacterPoser : IDisposable
     /// <summary>Animgraph parameters for holding with <paramref name="holdType"/> (the citizen holdtype enum), aiming forward.</summary>
     public static void ApplyParameters( SkinnedModelRenderer body, int holdType )
     {
-        body.Set( "holdtype", holdType );
-        body.Set( "holdtype_handedness", 0 );
-        body.Set( "b_grounded", true );
-        body.Set( "move_x", 0f );
-        body.Set( "move_y", 0f );
-        body.Set( "move_speed", 0f );
-        body.Set( "move_groundspeed", 0f );
-        body.SetLookDirection( "aim_eyes", Vector3.Forward, 1f );
-        body.SetLookDirection( "aim_head", Vector3.Forward, 1f );
-        body.SetLookDirection( "aim_body", Vector3.Forward, 1f );
+        AnimGraphParameters.Set( body, "holdtype", holdType );
+        AnimGraphParameters.Set( body, "holdtype_handedness", 0 );
+        AnimGraphParameters.Set( body, "b_grounded", true );
+        AnimGraphParameters.Set( body, "move_x", 0f );
+        AnimGraphParameters.Set( body, "move_y", 0f );
+        AnimGraphParameters.Set( body, "move_speed", 0f );
+        AnimGraphParameters.Set( body, "move_groundspeed", 0f );
+        AnimGraphParameters.SetLookDirection( body, "aim_eyes", Vector3.Forward, 1f );
+        AnimGraphParameters.SetLookDirection( body, "aim_head", Vector3.Forward, 1f );
+        AnimGraphParameters.SetLookDirection( body, "aim_body", Vector3.Forward, 1f );
+    }
+
+    /// <summary>
+    /// Puts the animgraph parameters of <paramref name="body"/> back to their defaults, so an action starts from a
+    /// fresh graph state. On AnimGraph2 the values set so far are forgotten: the next write carries only the
+    /// parameters set after this, and the rest go back to their defaults.
+    /// </summary>
+    public static void ResetParameters( SkinnedModelRenderer body )
+    {
+        body.SceneModel?.ResetAnimParameters();
+        AnimGraphParameters.Forget( body );
     }
 
     public void Dispose()

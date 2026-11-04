@@ -2,10 +2,12 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using WeaponImporter.EditorTools.Core.Analysis;
 using WeaponImporter.EditorTools.Core.Generation;
+using WeaponImporter.EditorTools.Core.Graph;
 using WeaponImporter.EditorTools.Core.Maths;
 using WeaponImporter.EditorTools.Core.Output;
 using WeaponImporter.EditorTools.Core.Setup;
 using WeaponImporter.EditorTools.Core.Weapon;
+using WeaponImporter.Engine;
 using N = System.Numerics;
 
 namespace WeaponImporter.EditorTools.Engine;
@@ -79,6 +81,12 @@ public static partial class WeaponBaker
         }
         result.Notes.AddRange( exported.Notes );
 
+        // The character decides the graph system: one posed with AnimGraph2 gets AnimGraph2 weapon graphs, whose
+        // skeleton and clips (animGraph2Sources) compile before them.
+        var animGraph2 = CharacterLibrary.VersionOf( session.CharacterModel ) == AnimGraphVersion.AnimGraph2;
+        var graphExtension = animGraph2 ? ".ag" : ".vanmgrph";
+        var animGraph2Sources = new List<string>();
+
         // 2. VMDL.
         progress?.Report( "Writing model" );
         var vmdl = new VmdlBuilder { MeshFile = exported.MeshFile };
@@ -109,11 +117,20 @@ public static partial class WeaponBaker
         if ( exported.Clips.Count > 0 && sequenceByRole.ContainsKey( AnimationRole.Idle ) )
         {
             var graphClips = sequenceByRole.Select( kv => new Core.Graph.GraphClip( kv.Key, kv.Value, AnimationRoles.Loops( kv.Key ), ActionTiming.Seconds( setup, session.Analysis?.Asset, kv.Key ) ) { Variants = VariantSequences( setup, kv.Key ) } ).ToList();
-            var graphPath = $"{folder}/{name}.vanmgrph";
-            WriteEditable( result, setup, graphPath, Core.Graph.WeaponGraphGenerator.Generate( name, graphClips, null, out _, modelPath ) );
+            var graphPath = $"{folder}/{name}{graphExtension}";
+            if ( animGraph2 )
+            {
+                var graph = Core.Graph.WeaponGraphGenerator.GenerateDocument( name, graphClips, null, out _, modelPath );
+                WriteAnimGraph2( result, setup, graphPath, graph, modelPath, exported.MeshFile, exported.Clips, animGraph2Sources );
+                vmdl.AnimationGraph = graphPath;
+            }
+            else
+            {
+                WriteEditable( result, setup, graphPath, Core.Graph.WeaponGraphGenerator.Generate( name, graphClips, null, out _, modelPath ) );
+                vmdl.AnimGraph = graphPath;
+            }
             result.Files.Add( graphPath );
             result.GraphPath = graphPath;
-            vmdl.AnimGraph = graphPath;
         }
         AddAttachments( vmdl, session, exported.Rig );
         AssetCompiler.WriteText( modelPath, vmdl.Build() );
@@ -142,11 +159,20 @@ public static partial class WeaponBaker
             if ( fpSequences.ContainsKey( AnimationRole.Idle ) )
             {
                 var fpClips = fpSequences.Select( kv => new Core.Graph.GraphClip( kv.Key, kv.Value, AnimationRoles.Loops( kv.Key ), ActionTiming.Seconds( setup, session.Analysis?.Asset, kv.Key ) ) { Variants = VariantSequences( setup, kv.Key ) } ).ToList();
-                var fpGraph = $"{folder}/{fpName}.vanmgrph";
+                var fpGraph = $"{folder}/{fpName}{graphExtension}";
                 var camera = fp.CameraBone.Length > 0 ? EngineNames.Bone( fp.CameraBone ) : null;
-                WriteEditable( result, setup, fpGraph, Core.Graph.WeaponGraphGenerator.Generate( fpName, fpClips, camera, out _, fpModelPath ) );
+                if ( animGraph2 )
+                {
+                    var graph = Core.Graph.WeaponGraphGenerator.GenerateDocument( fpName, fpClips, camera, out _, fpModelPath );
+                    WriteAnimGraph2( result, setup, fpGraph, graph, fpModelPath, exported.FirstPersonMeshFile, exported.FirstPersonClips, animGraph2Sources );
+                    fpVmdl.AnimationGraph = fpGraph;
+                }
+                else
+                {
+                    WriteEditable( result, setup, fpGraph, Core.Graph.WeaponGraphGenerator.Generate( fpName, fpClips, camera, out _, fpModelPath ) );
+                    fpVmdl.AnimGraph = fpGraph;
+                }
                 result.Files.Add( fpGraph );
-                fpVmdl.AnimGraph = fpGraph;
             }
             AssetCompiler.WriteText( fpModelPath, fpVmdl.Build() );
             result.Files.Add( fpModelPath );
@@ -192,6 +218,12 @@ public static partial class WeaponBaker
         progress?.Report( "Compiling" );
         await AssetCompiler.RegisterAsync( result.Files );
         await EditorThread.Delay( 1500, cancel );
+        foreach ( var animGraph2Source in animGraph2Sources )
+        {
+            var c = await AssetCompiler.CompileAsync( animGraph2Source, 60f, cancel );
+            if ( !c.Success )
+                result.Errors[animGraph2Source] = c.Errors;
+        }
         // The model references the graph, so the graph compiles first.
         if ( result.GraphPath.Length > 0 )
         {
@@ -221,7 +253,7 @@ public static partial class WeaponBaker
 
         if ( result.FirstPersonModelPath.Length > 0 )
         {
-            var fpGraph = result.FirstPersonModelPath[..^".vmdl".Length] + ".vanmgrph";
+            var fpGraph = result.FirstPersonModelPath[..^".vmdl".Length] + graphExtension;
             if ( result.Files.Contains( fpGraph ) )
             {
                 var g = await AssetCompiler.CompileAsync( fpGraph, 60f, cancel );
@@ -268,6 +300,28 @@ public static partial class WeaponBaker
         }
         AssetCompiler.WriteText( relative, text );
         setup.GeneratedHashes[relative] = Fingerprint( text );
+    }
+
+    /// <summary>
+    /// Writes an AnimGraph2 weapon graph (<see cref="WriteEditable"/>) with what it plays: a skeleton from the mesh's
+    /// source art and a clip per exported animation, each added to <paramref name="sources"/> to compile before it.
+    /// </summary>
+    private static void WriteAnimGraph2( BakeResult result, WeaponSetup setup, string graphPath, GraphKvObject graph, string modelPath, string meshFile, IEnumerable<ExportedClip> clips, List<string> sources )
+    {
+        var skeleton = System.IO.Path.ChangeExtension( meshFile, ".skel" );
+        AssetCompiler.WriteText( skeleton, AnimGraph2Sources.Skeleton( meshFile ) );
+        result.Files.Add( skeleton );
+        sources.Add( skeleton );
+        var animations = new Dictionary<string, string>();
+        foreach ( var clip in clips )
+        {
+            var animation = System.IO.Path.ChangeExtension( clip.File, ".anim" );
+            AssetCompiler.WriteText( animation, AnimGraph2Sources.Clip( clip.File, skeleton ) );
+            result.Files.Add( animation );
+            sources.Add( animation );
+            animations[clip.Sequence] = animation;
+        }
+        WriteEditable( result, setup, graphPath, AnimGraph2Writer.Write( graph, modelPath, skeleton, animations ) );
     }
 
     private static string Fingerprint( string text )

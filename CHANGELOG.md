@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-03
+### Added
+- AnimGraph2 support, chosen by the character: when the character the weapon is fitted to is posed with an
+  AnimGraph2 graph (`.ag`, its own or the borrowed citizen/human one), the preview drives that graph and the bake
+  writes AnimGraph2 weapon graphs (`<name>.ag`, `<name>_fp.ag`, assigned with `animation_graph_name`) with the
+  same parameters, states and transitions, plus a `.skel` and an `.anim` per clip under `generated/`. AnimGraph1
+  characters (every shipped one today) bake exactly as before. An edited `.ag` is kept like an edited `.vanmgrph`.
+- The viewport header shows the character's graph system ("AnimGraph1 (legacy)" or "Using AnimGraph2"), and the
+  Animations page names it wherever it mentions the character animgraph.
+- `WeaponImporter.Engine.AnimGraphParameters` sets animgraph parameters on either graph system; Weapon Hold and
+  Weapon Viewmodel use it. On an AnimGraph2 character, Weapon Hold only sees action triggers set through it
+  (`AnimGraphParameters.Trigger( body, "b_attack" )`), since game code can't read AnimGraph2 parameters.
+### Fixed
+- A bake no longer reports a compile error for a file the engine refused to compile while a content build was
+  running; it tries again.
+
 ## 2026-10-06
 ### Breaking
 - Runtime types moved out of the `WeaponImporter` namespace. Add the matching `using` to game code

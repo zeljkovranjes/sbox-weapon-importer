@@ -20,6 +20,8 @@ public sealed class VmdlBuilder
     public List<VmdlAttachment> Attachments { get; } = new();
     public List<string> KeepBones { get; } = new();
     public string AnimGraph { get; set; } = "";
+    /// <summary>The AnimGraph2 graph (a <c>.ag</c>); written only when set, beside <see cref="AnimGraph"/>.</summary>
+    public string AnimationGraph { get; set; } = "";
     public string BaseModel { get; set; } = "";
 
     public string Build()
@@ -129,6 +131,8 @@ public sealed class VmdlBuilder
             .Add("primary_associated_entity", "")
             .Add("anim_graph_name", AnimGraph)
             .Add("base_model_name", BaseModel);
+        if (!string.IsNullOrEmpty(AnimationGraph))
+            rootNode.Add("animation_graph_name", AnimationGraph);
         return Kv3.Serialize(new KvObject().Add("rootNode", rootNode));
     }
 
