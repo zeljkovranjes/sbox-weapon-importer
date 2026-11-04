@@ -7,6 +7,8 @@
   writes AnimGraph2 weapon graphs (`<name>.ag`, `<name>_fp.ag`, assigned with `animation_graph_name`) with the
   same parameters, states and transitions, plus a `.skel` and an `.anim` per clip under `generated/`. AnimGraph1
   characters (every shipped one today) bake exactly as before. An edited `.ag` is kept like an edited `.vanmgrph`.
+- The viewport header shows the character's graph system ("AnimGraph1 (legacy)" or "Using AnimGraph2"), and the
+  Animations page names it wherever it mentions the character animgraph.
 - `WeaponImporter.Engine.AnimGraphParameters` sets animgraph parameters on either graph system; Weapon Hold and
   Weapon Viewmodel use it. On an AnimGraph2 character, Weapon Hold only sees action triggers set through it
   (`AnimGraphParameters.Trigger( body, "b_attack" )`), since game code can't read AnimGraph2 parameters.

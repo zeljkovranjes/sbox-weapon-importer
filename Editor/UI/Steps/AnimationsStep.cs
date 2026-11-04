@@ -2,6 +2,7 @@ using Editor;
 using Sandbox;
 using WeaponImporter.EditorTools.Core.Analysis;
 using WeaponImporter.EditorTools.Core.Setup;
+using WeaponImporter.Engine;
 
 namespace WeaponImporter.EditorTools.UI.Steps;
 using WeaponImporter.EditorTools.Engine;
@@ -80,7 +81,7 @@ public sealed class AnimationsStep : StepPanel
 		}
 		var field = UiStyle.FieldRow( card, card.Layout, "Style", "How the character holds and uses this weapon in third person. The hold plays over the upper body while the weapon is held; attacks, blocks and uses play over it." );
 		var covered = StockThirdPerson.Sequences( s.StockStyle ).Select( e => AnimationRoles.Label( e.Role, s.Type ) ).Distinct().ToList();
-		var tip = s.StockStyle == StockStyle.None ? "The character's animgraph plays every action. Click to change." : $"Stock animations for: {string.Join( ", ", covered )}. Click to change.";
+		var tip = s.StockStyle == StockStyle.None ? $"The character's animgraph ({CharacterGraph}) plays every action. Click to change." : $"Stock animations for: {string.Join( ", ", covered )}. Click to change.";
 		field.Add( new ClickField( card, StockThirdPerson.Label( s.StockStyle ), "accessibility_new", s.StockStyle == StockStyle.None ? Theme.TextLight : Theme.Green, ChooseStockStyle, tip ), 1 );
 		field.Add( s.StockStyleManual ? new Pill( card, "EDITED", Theme.Blue, "You picked this style", column: true ) : new Pill( card, "AUTO", Theme.TextLight, "Picked from the weapon's type, name and size", column: true ) );
 	}
@@ -238,12 +239,15 @@ public sealed class AnimationsStep : StepPanel
 		return bar >= 0 && bar < clip.Length - 1 ? clip[(bar + 1)..] : clip;
 	}
 
-	private static string ThirdPersonText( AnimationRole role, CharacterAnimation tp )
+	/// <summary>The character's graph system, as the indicator names it.</summary>
+	private string CharacterGraph => AnimGraphVersions.Describe( CharacterLibrary.VersionOf( C.Session.CharacterModel ) );
+
+	private string ThirdPersonText( AnimationRole role, CharacterAnimation tp )
 	{
 		if ( tp.Source == CharacterAnimationSource.Graph )
 		{
 			var trigger = AnimationRoles.GraphTrigger( role );
-			return trigger is null ? "Character animgraph" : $"Character animgraph · {trigger}";
+			return trigger is null ? $"Character animgraph ({CharacterGraph})" : $"Character animgraph ({CharacterGraph}) · {trigger}";
 		}
 		if ( tp.Source == CharacterAnimationSource.Sequence )
 			return string.IsNullOrEmpty( tp.Model ) ? $"{tp.Sequence} · character" : $"{tp.Sequence} · {System.IO.Path.GetFileNameWithoutExtension( tp.Model )}";
@@ -325,7 +329,7 @@ public sealed class AnimationsStep : StepPanel
 		C.SelectRole( role );
 		var menu = new Menu( this );
 		menu.AddHeading( $"Third person · {AnimationRoles.Label( role )}" );
-		menu.AddOption( "Character animgraph", "account_tree", () => SetThirdPerson( role, new CharacterAnimation { Source = CharacterAnimationSource.Graph, Manual = true } ) );
+		menu.AddOption( $"Character animgraph ({CharacterGraph})", "account_tree", () => SetThirdPerson( role, new CharacterAnimation { Source = CharacterAnimationSource.Graph, Manual = true } ) );
 		AddCharacterSequences( menu.AddMenu( "Character sequence", "accessibility_new" ), role );
 		if ( StockAnimations.Sequences is { Count: > 0 } stock )
 		{
