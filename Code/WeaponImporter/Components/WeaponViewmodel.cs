@@ -1,4 +1,5 @@
 using Sandbox;
+using WeaponImporter.Engine;
 
 namespace WeaponImporter.Components;
 
@@ -58,8 +59,11 @@ public sealed class WeaponViewmodel : Component
     private string _sequence = "";
     private WeaponHold _listening;
 
-    /// <summary>The viewmodel plays its own animgraph (the importer generates one when the file has an idle).</summary>
-    public bool UsesGraph => Renderer.IsValid() && Renderer.Model?.AnimGraph is not null;
+    /// <summary>
+    /// The viewmodel plays its own animgraph (the importer generates one when the file has an idle): an AnimGraph1
+    /// graph, or an AnimGraph2 one when the weapon was baked for an AnimGraph2 character.
+    /// </summary>
+    public bool UsesGraph => Renderer.IsValid() && (Renderer.Model?.AnimGraph is not null || AnimGraphVersions.Of( Renderer.Model ) == AnimGraphVersion.AnimGraph2);
     private bool _detached;
     private bool _showing;
     private CameraComponent _nearCamera;
@@ -101,11 +105,11 @@ public sealed class WeaponViewmodel : Component
         DriveShellReload( renderer );
         if ( UsesGraph && renderer.UseAnimGraph && Hold.IsValid() )
         {
-            renderer.Set( "ironsights", Hold.Aiming ? 1 : 0 );
-            renderer.Set( "b_empty", Hold.Empty );
-            renderer.Set( "b_block", Hold.Blocking );
+            AnimGraphParameters.Set( renderer, "ironsights", Hold.Aiming ? 1 : 0 );
+            AnimGraphParameters.Set( renderer, "b_empty", Hold.Empty );
+            AnimGraphParameters.Set( renderer, "b_block", Hold.Blocking );
             if ( Hold.HasHeldUse )
-                renderer.Set( "b_use", Hold.Using );
+                AnimGraphParameters.Set( renderer, "b_use", Hold.Using );
         }
         var camera = Scene.Camera;
         if ( _kick > 0f )
@@ -152,8 +156,8 @@ public sealed class WeaponViewmodel : Component
             case "fireempty":
                 // Several attack clips: the graph plays the one Weapon Hold picked for this attack.
                 if ( Hold.IsValid() )
-                    renderer.Set( "attack_variant", Hold.AttackVariant - 1 );
-                renderer.Set( "b_attack", true );
+                    AnimGraphParameters.Set( renderer, "attack_variant", Hold.AttackVariant - 1 );
+                AnimGraphParameters.Trigger( renderer, "b_attack" );
                 // Aimed without an aimed-fire clip: the graph holds the sights up; kick instead.
                 if ( Hold.IsValid() && Hold.Aiming && string.IsNullOrEmpty( Hold.SequenceFor( "adsfire" ) ) )
                     _kick = MathF.Min( 1.5f, _kick + 1f );
@@ -161,35 +165,35 @@ public sealed class WeaponViewmodel : Component
             case "reload":
             case "tacticalreload":
             case "emptyreload":
-                renderer.Set( "b_empty", role == "emptyreload" || Hold.IsValid() && Hold.Empty );
-                renderer.Set( "b_reload", true );
+                AnimGraphParameters.Set( renderer, "b_empty", role == "emptyreload" || Hold.IsValid() && Hold.Empty );
+                AnimGraphParameters.Trigger( renderer, "b_reload" );
                 break;
             case "reloadstart":
             case "reloadinsert":
                 // Shell reload: DriveShellReload keeps b_reload on while more shells follow.
-                renderer.Set( "b_reload", true );
+                AnimGraphParameters.Set( renderer, "b_reload", true );
                 break;
             case "inspect":
-                renderer.Set( "b_inspect", true );
+                AnimGraphParameters.Trigger( renderer, "b_inspect" );
                 break;
             case "attack2":
                 if ( Hold.IsValid() )
-                    renderer.Set( "attack_variant", Hold.AttackVariant - 1 );
-                renderer.Set( "b_attack2", true );
+                    AnimGraphParameters.Set( renderer, "attack_variant", Hold.AttackVariant - 1 );
+                AnimGraphParameters.Trigger( renderer, "b_attack2" );
                 break;
             case "use":
             case "usestart":
-                renderer.Set( "b_use", true );
+                AnimGraphParameters.Trigger( renderer, "b_use" );
                 break;
             case "throw":
-                renderer.Set( "b_throw", true );
+                AnimGraphParameters.Trigger( renderer, "b_throw" );
                 break;
             case "holster":
-                renderer.Set( "b_holster", true );
+                AnimGraphParameters.Set( renderer, "b_holster", true );
                 break;
             case "draw":
-                renderer.Set( "b_holster", false );
-                renderer.Set( "b_deploy", true );
+                AnimGraphParameters.Set( renderer, "b_holster", false );
+                AnimGraphParameters.Trigger( renderer, "b_deploy" );
                 break;
         }
     }
@@ -212,12 +216,12 @@ public sealed class WeaponViewmodel : Component
             // Held at the start of each insert too, so the graph always enters the reload; it only
             // reads b_reload again when the insert finishes.
             var more = Hold.CurrentRole == "reloadstart" ? Hold.ShellsRemaining > 0 : Hold.ShellsRemaining > 1 || Hold.CurrentTime < 0.25f;
-            renderer.Set( "b_reload", more );
+            AnimGraphParameters.Set( renderer, "b_reload", more );
         }
         else if ( _drivingShells )
         {
             _drivingShells = false;
-            renderer.Set( "b_reload", false );
+            AnimGraphParameters.Set( renderer, "b_reload", false );
         }
     }
 

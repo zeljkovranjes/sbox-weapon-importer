@@ -358,7 +358,9 @@ public sealed class WeaponHold : Component
     /// Reads the action trigger parameters now. <see cref="WeaponHoldSystem"/> calls this every
     /// frame before the animgraph runs, because graphs such as the citizen's reset triggers
     /// (b_attack, b_reload) as soon as they consume them. Call it yourself after setting a
-    /// parameter when driving the hold manually with <see cref="Apply"/>.
+    /// parameter when driving the hold manually with <see cref="Apply"/>. On an AnimGraph2 character
+    /// game code can't read the graph's parameters, so only triggers set through
+    /// <see cref="AnimGraphParameters"/> are seen there.
     /// </summary>
     public void ReadTriggers()
     {
@@ -441,8 +443,8 @@ public sealed class WeaponHold : Component
             StartAction( IdleRole, weapon );
         }
 
-        if ( HoldType >= 0 && advance && body.GetInt( "holdtype" ) != HoldType )
-            body.Set( "holdtype", HoldType );
+        if ( HoldType >= 0 && advance && AnimGraphParameters.GetInt( body, "holdtype" ) != HoldType )
+            AnimGraphParameters.Set( body, "holdtype", HoldType );
 
         if ( !_paused )
         {
@@ -880,15 +882,15 @@ public sealed class WeaponHold : Component
             _stopShells = false;
             _shellsLeft = Math.Max( 0, ShellsToLoad );
             if ( body.IsValid() )
-                body.Set( "b_reloading", true );
+                AnimGraphParameters.Set( body, "b_reloading", true );
         }
         if ( role == InsertRole && body.IsValid() )
-            body.Set( "b_reloading_insert", true );
+            AnimGraphParameters.Trigger( body, "b_reloading_insert" );
         if ( !shellPart && _shellReload )
         {
             _shellReload = false;
             if ( body.IsValid() )
-                body.Set( "b_reloading", false );
+                AnimGraphParameters.Set( body, "b_reloading", false );
         }
     }
 
@@ -966,7 +968,7 @@ public sealed class WeaponHold : Component
         for ( int i = 0; i < _triggers.Count; i++ )
         {
             var binding = _triggers[i];
-            bool value = body.GetBool( binding.Parameter );
+            bool value = AnimGraphParameters.GetBool( body, binding.Parameter );
             if ( value && !binding.Previous )
             {
                 binding.Role = ChooseRole( binding );

@@ -1,6 +1,10 @@
 # Changelog
 
 ## 2026-11-03
+### Added
+- `WeaponImporter.Engine.AnimGraphParameters` sets animgraph parameters on either graph system; Weapon Hold and
+  Weapon Viewmodel use it. On an AnimGraph2 character, Weapon Hold only sees action triggers set through it
+  (`AnimGraphParameters.Trigger( body, "b_attack" )`), since game code can't read AnimGraph2 parameters.
 ### Fixed
 - A bake no longer reports a compile error for a file the engine refused to compile while a content build was
   running; it tries again.
