@@ -94,7 +94,9 @@ public static class AssetCompiler
 
             var log = EngineLog.Since( logStart );
             var name = System.IO.Path.GetFileName( relative );
-            if ( log.Any( l => l.Contains( "abandoning", StringComparison.OrdinalIgnoreCase ) && l.Contains( name, StringComparison.OrdinalIgnoreCase ) ) )
+            // Abandoned, or refused while a content build runs (the bake's own registrations start one): try again.
+            if ( log.Any( l => (l.Contains( "abandoning", StringComparison.OrdinalIgnoreCase ) || l.Contains( "a content build is running", StringComparison.OrdinalIgnoreCase ))
+                && l.Contains( name, StringComparison.OrdinalIgnoreCase ) ) )
             {
                 await EditorThread.Delay( 2000, cancel );
                 continue;

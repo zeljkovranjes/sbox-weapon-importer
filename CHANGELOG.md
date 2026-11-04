@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-03
+### Fixed
+- A bake no longer reports a compile error for a file the engine refused to compile while a content build was
+  running; it tries again.
+
 ## 2026-10-06
 ### Breaking
 - Runtime types moved out of the `WeaponImporter` namespace. Add the matching `using` to game code
